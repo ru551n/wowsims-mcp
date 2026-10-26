@@ -28,9 +28,24 @@ async def test_mcp_lists_annotated_tools() -> None:
         "wowsims_list_specs",
         "wowsims_simulate",
         "wowsims_compare",
+        "wowsims_list_characters",
+        "wowsims_get_character",
+        "wowsims_save_character",
+        "wowsims_set_default_character",
+        "wowsims_delete_character",
+        "wowsims_update_character",
         "wowsims_help",
     }
-    assert all(tool.annotations and tool.annotations.readOnlyHint for tool in tools)
+    writes = {
+        "wowsims_save_character",
+        "wowsims_set_default_character",
+        "wowsims_delete_character",
+        "wowsims_update_character",
+    }
+    assert all(
+        tool.annotations and tool.annotations.readOnlyHint == (tool.name not in writes)
+        for tool in tools
+    )
     search = next(tool for tool in tools if tool.name == "wowsims_search_items")
     assert search.inputSchema["properties"]["limit"]["maximum"] == 25
     assert "class" in search.inputSchema["properties"]
