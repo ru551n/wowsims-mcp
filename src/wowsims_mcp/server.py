@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .comparison import build_variant_request, compare_requests
 from .constants import SIM_COMMIT, SIM_REF
 from .database import DatabaseError, GameDatabase, make_filters
 from .presets import build_request, list_specs, load_presets
@@ -283,7 +284,7 @@ async def wowsims_simulate(
     ] = None,
     duration_s: Annotated[float, Field(default=300, gt=0, le=3600)] = 300,
     targets: Annotated[int, Field(default=1, ge=1, le=20)] = 1,
-    iterations: Annotated[int, Field(default=3000, ge=1, le=20000)] = 3000,
+    iterations: Annotated[int, Field(default=10000, ge=1, le=20000)] = 10000,
 ) -> dict[str, Any]:
     """Simulate a player using a preset plus optional gear and talent overrides."""
     try:
@@ -339,6 +340,109 @@ async def wowsims_simulate(
             "code": "SIM_FAILED",
             "message": str(exc),
             "next_step": "Check gear, talents, and spec compatibility.",
+        }
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def wowsims_compare(
+    character_class: Annotated[
+        str, Field(validation_alias="class", description="Player class, such as rogue.")
+    ],
+    spec: str,
+    race: Annotated[str, Field(description="Baseline race valid for the class.")],
+    variants: Annotated[
+        list[dict[str, Any]],
+        Field(
+            min_length=1,
+            max_length=8,
+            description="Each variant needs a label and race, gear, "
+            "or talents override.",
+        ),
+    ],
+    gear: Annotated[
+        dict[str, str | int] | None,
+        Field(default=None, description="Optional baseline gear overrides by slot."),
+    ] = None,
+    talents: str | None = None,
+    duration_s: Annotated[float, Field(default=300, gt=0, le=3600)] = 300,
+    targets: Annotated[int, Field(default=1, ge=1, le=20)] = 1,
+    iterations: Annotated[int, Field(default=10000, ge=1, le=20000)] = 10000,
+) -> dict[str, Any]:
+    """Compare race, gear, or talent variants against one baseline using shared RNG."""
+    try:
+        baseline, metadata = build_request(
+            get_presets(),
+            get_database(),
+            spec,
+            character_class,
+            race,
+            gear,
+            talents,
+            duration_s,
+            targets,
+            iterations,
+        )
+        variant_requests = []
+        labels = set()
+        for variant in variants:
+            label = str(variant.get("label", "")).strip()
+            if not label or label in labels:
+                raise DatabaseError("Each variant needs a unique, non-empty label.")
+            labels.add(label)
+            variant_requests.append(
+                build_variant_request(
+                    baseline,
+                    get_database(),
+                    label,
+                    variant.get("race"),
+                    variant.get("gear"),
+                    variant.get("talents"),
+                )
+            )
+        comparison = await compare_requests(get_runner(), baseline, variant_requests)
+        best = comparison["results"][0]
+        return {
+            "ok": True,
+            **metadata,
+            **comparison,
+            "duration_s": duration_s,
+            "targets": targets,
+            "ruleset_note": "TBC sim comparison, not combat logs; no raid buffs.",
+            "summary": (
+                f"Best variant: {best['label']} at {best['dps']['mean']:.1f} DPS "
+                f"({best['delta']:+.1f}, {best['delta_pct']:+.2f}%). "
+                + ("Difference is within noise." if best["within_noise"] else "")
+            ),
+        }
+    except DatabaseError as exc:
+        return _error(exc)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "code": "INVALID_OVERRIDE",
+            "message": str(exc),
+            "next_step": "Give every variant a race, gear, or talents override.",
+        }
+    except SimulationUnavailable as exc:
+        return {
+            "ok": False,
+            "code": "SIM_UNAVAILABLE",
+            "message": str(exc),
+            "next_step": "Configure the simulator before requesting a comparison.",
+        }
+    except SimulationTimeout as exc:
+        return {
+            "ok": False,
+            "code": "SIM_TIMEOUT",
+            "message": str(exc),
+            "next_step": "Retry with fewer variants or iterations.",
+        }
+    except SimulationError as exc:
+        return {
+            "ok": False,
+            "code": "SIM_FAILED",
+            "message": str(exc),
+            "next_step": "Check each variant's gear, talents, and spec compatibility.",
         }
 
 
@@ -413,6 +517,17 @@ def wowsims_help(
                 "gear": {"main_hand": "Thunderfury"},
             },
             "keywords": "simulate dps damage gear race class spec result",
+        },
+        {
+            "tool": "wowsims_compare",
+            "one_line": "Compare race, gear, or talent variants with noise flags.",
+            "example_call": {
+                "class": "rogue",
+                "spec": "combat",
+                "race": "human",
+                "variants": [{"label": "Troll", "race": "troll"}],
+            },
+            "keywords": "compare simulation racial gear talent better dps",
         },
     ]
     if task:

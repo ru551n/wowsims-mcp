@@ -133,6 +133,87 @@ def _validate_gear_slot(
         raise DatabaseError(f"{item['name']} is not usable by {character_class}.")
 
 
+def apply_overrides(
+    request: dict[str, Any],
+    db: GameDatabase,
+    race: str | None = None,
+    gear: dict[str, str | int] | None = None,
+    talents: str | None = None,
+) -> list[dict[str, Any]]:
+    player = request["raid"]["parties"][0]["players"][0]
+    character_class = normalize(player["class"].removeprefix("Class"))
+    applied = []
+    if race is not None:
+        selected_race = _race(race)
+        class_id = next(key for key, name in CLASSES.items() if name == character_class)
+        valid_races = {
+            1: {
+                "human",
+                "dwarf",
+                "night_elf",
+                "gnome",
+                "draenei",
+                "orc",
+                "undead",
+                "tauren",
+                "troll",
+            },
+            2: {"human", "dwarf", "draenei", "blood_elf"},
+            3: {"dwarf", "night_elf", "draenei", "orc", "tauren", "troll", "blood_elf"},
+            4: {
+                "human",
+                "dwarf",
+                "night_elf",
+                "gnome",
+                "orc",
+                "undead",
+                "troll",
+                "blood_elf",
+            },
+            5: {
+                "human",
+                "dwarf",
+                "night_elf",
+                "draenei",
+                "undead",
+                "troll",
+                "blood_elf",
+            },
+            7: {"draenei", "orc", "tauren", "troll"},
+            8: {"human", "gnome", "draenei", "undead", "troll", "blood_elf"},
+            9: {"human", "gnome", "orc", "undead", "blood_elf"},
+            11: {"night_elf", "tauren"},
+        }[class_id]
+        if selected_race not in valid_races:
+            raise DatabaseError(
+                f"{selected_race} is not available for {character_class}. "
+                f"Valid races: {', '.join(sorted(valid_races))}."
+            )
+        player["race"] = RACES[selected_race]
+        applied.append({"type": "race", "value": selected_race})
+    for slot_name, reference in (gear or {}).items():
+        slot = _slot(slot_name)
+        item = db.resolve(reference)
+        _validate_gear_slot(item, slot, character_class, db)
+        player["equipment"]["items"][slot] = {"id": item["id"]}
+        applied.append(
+            {
+                "type": "gear",
+                "slot": slot_name,
+                "id": item["id"],
+                "name": item["name"],
+            }
+        )
+    if talents is not None:
+        if not talents.strip():
+            raise DatabaseError(
+                "Talents must not be empty; omit them to use the preset."
+            )
+        player["talentsString"] = talents
+        applied.append({"type": "talents", "value": talents})
+    return applied
+
+
 def build_request(
     presets: dict[str, Any],
     db: GameDatabase,
@@ -143,7 +224,7 @@ def build_request(
     talents: str | None = None,
     duration_s: float = 300,
     targets: int = 1,
-    iterations: int = 3000,
+    iterations: int = 10000,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     selected_class = normalize(character_class).replace(" ", "_")
     class_specs = [
@@ -184,15 +265,6 @@ def build_request(
     equipment.setdefault("items", [{} for _ in range(17)])
     while len(equipment["items"]) < 17:
         equipment["items"].append({})
-    resolved_gear = []
-    for slot_name, reference in (gear or {}).items():
-        slot = _slot(slot_name)
-        item = db.resolve(reference)
-        _validate_gear_slot(item, slot, preset["class"], db)
-        equipment["items"][slot] = {"id": item["id"]}
-        resolved_gear.append(
-            {"slot": slot_name, "id": item["id"], "name": item["name"]}
-        )
     player = {
         "name": f"{preset['spec'].replace('_', ' ').title()} {preset['class'].title()}",
         "race": RACES[selected_race],
@@ -201,7 +273,7 @@ def build_request(
         "consumables": deepcopy(preset.get("consumables", {})),
         "buffs": {},
         preset["field"]: {"options": deepcopy(preset.get("options", {}))},
-        "talentsString": preset["talents"] if talents is None else talents,
+        "talentsString": preset["talents"],
         "rotation": deepcopy(preset["rotation"]),
         "distanceFromTarget": preset.get("distance", 5),
     }
@@ -221,8 +293,14 @@ def build_request(
                 {"stats": [0] * 31 + [7685] + [0] * 10} for _ in range(targets)
             ],
         },
-        "simOptions": {"iterations": iterations, "randomSeed": 1, "debug": False},
+        "simOptions": {
+            "iterations": iterations,
+            "randomSeed": 1,
+            "debug": False,
+            "useLabeledRands": True,
+        },
     }
+    resolved_gear = apply_overrides(request, db, gear=gear, talents=talents)
     metadata = {
         "spec_id": key,
         "class": preset["class"],
