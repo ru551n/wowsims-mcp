@@ -73,14 +73,19 @@ override.
     "ok": true,
     "status": "exact | confident | ambiguous | suggestions | not_found",
     "query": "thunderfuri",
-    "best": {"id": 19019, "name": "Thunderfury, Blessed Blade of the Windseeker", "slot": "...", "ilvl": 0, "quality": "..."},
-    "did_you_mean": [{"id": 0, "name": "...", "slot": "...", "ilvl": 0, "score": 0.0}],
-    "same_name_count": 1,
-    "summary": "Closest match: Thunderfury, Blessed Blade of the Windseeker (confident)."
+    "candidates": [
+      {"id": 19019, "name": "Thunderfury, Blessed Blade of the Windseeker", "slot": "...", "ilvl": 0, "quality": "...", "probability": 0.72, "same_name_count": 1}
+    ],
+    "none_of_these": 0.28,
+    "summary": "Thunderfury, Blessed Blade of the Windseeker: 72% likely; 28% it is not in the database."
   }
   ```
-  `best` is only present for `exact` and `confident`. `did_you_mean` is ordered
-  best first and always present unless `not_found`.
+  **The LLM decides from the probabilities.** `candidates` is ordered best first
+  (up to `limit`); every `probability` is the chance that this item is the one
+  the user meant; `none_of_these` is the chance that the intended item is not in
+  the list or not in the database at all. Candidates plus `none_of_these` sum to
+  1. `status` is only an advisory label derived from those numbers (so the
+  thresholds live in one place); the bot is free to ignore it.
 
 **`wowsims_get_item`**
 - args: `item` (ID, or exact name)
@@ -94,7 +99,8 @@ override.
 Name resolution used by every override (F2 onward) is the same resolver as
 `wowsims_search_items`: `exact` and `confident` resolve silently (the tool
 reports what it resolved to); `ambiguous`, `suggestions` and `not_found` return
-`INVALID_OVERRIDE` with `did_you_mean` so the bot can ask "menade du X?".
+`INVALID_OVERRIDE` carrying the same `candidates` (with probabilities) and
+`none_of_these`, so the bot can ask "menade du X?".
 
 ### Matching and misspellings (F1)
 
@@ -122,15 +128,23 @@ Identical names with several IDs (141 such names, e.g. "Insignia of the Horde"
 x16) are collapsed into one entry with `same_name_count` and listed with their
 differing fields (slot, ilvl, id) when the user has to choose.
 
-**Status, which tells the bot what to do:**
+**Probabilities.** Raw match scores are turned into probabilities with a
+softmax over the top candidates plus a reserved "none of these" outcome. The two
+fitted constants (a temperature and the none-of-these offset) are calibrated on
+the typo benchmark below, with unknown-item queries mixed in (about a quarter of
+the weight) so the none-of-these mass is meaningful. Calibration is re-fitted
+whenever the pinned `db.json` or the scorer changes, and the fit is stored in
+the repo with the benchmark seed.
 
-| status | meaning | bot behaviour |
+**Advisory status** (derived from the probabilities, for the bot's convenience):
+
+| status | when | suggested bot behaviour |
 | --- | --- | --- |
 | `exact` | normalised name equals exactly one item | use it |
-| `confident` | top score above the confident threshold and a clear margin over the runner-up | use it, mention the corrected name ("antar att du menar X") |
-| `ambiguous` | several items match about equally (e.g. a partial name shared by a whole set) | ask which one, listing `did_you_mean` |
-| `suggestions` | nothing is confident but there are plausible near matches | ask "menade du X, Y eller Z?" |
-| `not_found` | nothing is close enough | say it is not in the sim database; do not guess |
+| `confident` | top probability at least 0.85 | use it, mention the corrected name ("antar att du menar X") |
+| `ambiguous` | several candidates with similar probability (e.g. a partial name shared by a whole set) | ask which one, listing the candidates |
+| `suggestions` | no candidate above 0.85 but plausible ones exist | ask "menade du X, Y eller Z?" |
+| `not_found` | `none_of_these` at least 0.8 | say it is not in the sim database; do not guess |
 
 Same-name duplicates with different IDs are always `ambiguous` unless the user
 gave enough to pick one (slot filter, ilvl).
@@ -154,11 +168,34 @@ two-typo combinations):
   vocabulary with a symmetric-delete or BK-tree lookup) should be well under
   that.
 
+**Probability calibration, measured on the prototype** (700 typo queries plus 200
+unknown-item queries, same `db.json`; a simple two-constant fit):
+- Where it matters, it is trustworthy: every query where the top candidate got
+  60% or more was right (567 queries, 0 wrong); at 90% or more, 438 of 438.
+- Unknown items: the none-of-these mass averaged 0.62 for unknown-item queries
+  and 0.11 for real ones; 72% of unknown-item queries got at least 0.5.
+- Weak spots to fix in the real implementation, not papered over:
+  - **Underconfident in the middle:** below 0.4, the top candidate was actually
+    right 2-57% of the time depending on the bin (not monotone), so probabilities
+    there are rough. A proper fit on more features (word coverage, trigram
+    similarity, margin to the runner-up, number of close candidates) should
+    replace the two-constant softmax.
+  - **Run-together set prefixes** such as "premierlamellar" (a real set, spaces
+    dropped) got 0.97 none-of-these, because the scorer penalises item names with
+    extra words. Whole-name matching without spaces must count as a strong prefix
+    match, and the result should be an `ambiguous` list of the set's pieces.
+  - **Set prefixes in general** ("duskwov", "dragonmaw") correctly split
+    probability across the pieces (0.26/0.26/0.26...), which is the right signal
+    to ask the user.
+  Acceptance includes a reliability check on held-out queries (see tests).
+
 **Tests (acceptance for F1):** a fixed regression list of real-world mistakes
 (including ones from the Discord logs as they turn up), plus the generated-typo
 benchmark with the thresholds above (top-1 at least 90%, top-5 at least 97%,
 zero silent wrong picks: a `confident` result must be the intended item in the
-benchmark). Plus unit tests for each status, for same-name duplicates, for empty
+benchmark; calibration on held-out queries: among top candidates with
+probability at least 0.85, at least 97% are right, and the mean predicted
+probability in each 0.1-wide bin is within 0.10 of the observed rate). Plus unit tests for each status, for same-name duplicates, for empty
 and very long queries, and for non-ASCII input.
 
 ### Discovery (read-only)

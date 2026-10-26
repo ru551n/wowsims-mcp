@@ -54,7 +54,10 @@ guess. Users link their characters once; the bot sims them on request.
 
 1. **Sim runner**: wowsimcli binary built from source at a pinned ref (see
    "How we get wowsims"), invoked by the MCP server with a generated input JSON.
-2. **MCP server** (Python, FastMCP): validates input, builds the
+2. **MCP server** (**Python**, decided 2026-10-26; FastMCP, `uv`, pytest, same
+   layout as `~/git/vunit-mcp`: `pyproject.toml`, `src/wowsims_mcp/`, `tests/`;
+   the sim is a Go subprocess, so the wrapper's language is independent of it):
+   validates input, builds the
    `RaidSimRequest`, runs the sim, returns a compact summary (DPS, stat
    weights, comparison deltas).
 3. **Storage**: SQLite on a Docker volume (e.g. `data/presets.db`), owned by the
