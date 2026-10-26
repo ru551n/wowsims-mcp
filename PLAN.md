@@ -154,6 +154,27 @@ Each item below is part of F1 and has its own acceptance tests:
     - Open check: Wowhead item IDs are assumed to equal the sim's IDs (same
       client data); verify with a handful of items.
 
+### Likely user asks (candidate features, F10-F15)
+
+Drawn from what the Discord server already asks the bot (racials, builds, patch
+changes, guild setup) and natural follow-ups to the sim. None is built before its
+data is checked (milestone 10). Items marked "web" are left to the bot's web
+search and are not MCP features.
+
+| # | Ask | How | Data check needed |
+| --- | --- | --- | --- |
+| F10 | **Hit and crit caps**: "how much hit do I need?" | `wowsims_get_stat_caps(spec, race?)` from the sim's rules | does the sim expose caps, or must we derive them? |
+| F11 | **Talent builds**: "best rogue build", "compare these two trees" | `wowsims_get_talents(spec)`, and talent overrides in `simulate`/`compare` | talent tree data format in the sim protos and db |
+| F12 | **Gear upgrades**: "what's my biggest upgrade?" | `wowsims_best_items_for_slot` over all slots; ranks by stat weights, with the sources from F1 so the answer says where to get it | needs F3 and F4; "obtainable" depends on phase and source data |
+| F13 | **BiS lists**: "BiS for fury warrior phase 1" | sim-ranked best-in-slot per spec and phase, labelled as sim-ranked, not community consensus | needs F3; the sim does not know what is realistically obtainable |
+| F14 | **Consumable advice**: "which flask or potion for tanking?" | `wowsims_recommend_consumables(spec, role)`: sim-compared options on top of F1's consumable search | needs F2/F3 |
+| F15 | **Profession and crafting**: "what can tailoring craft for my class?" | crafted items by profession from F1's `sources`; recipes and materials are not in the data, so say so | check whether recipes exist anywhere in `db.json` |
+| web | Patch notes and fixes (F7 covers part), server and population info, beta codes, boss strategy, prices | the bot's `web_search`/`web_fetch` | none |
+| not MCP | Guild setup (roles, loot rules, recruiting), chat-history questions, game-night planning | the bot itself | none |
+
+Rule for all of these: if the data does not exist in the sim or `db.json`, the
+tool says so plainly and the bot falls back to web search; no invented numbers.
+
 ### Keeping the tool count manageable
 
 F1 is 8 tools (search, get, loot, set, compare, enchants, consumables, link), and
@@ -240,6 +261,8 @@ owning it.
    (Coverage of `db.json` itself is trusted, see Decisions.)
 7. Do the `gamedata` patch files (`items-changed.diff`, `CHANGES.md`) contain item
    names and IDs, and how big are they (needed for F7 and its runtime fetch)?
+8. Does the sim expose talent tree data and stat caps (F10, F11), and are crafting
+   recipes anywhere in `db.json` (F15)?
 
 ## Milestones
 
@@ -275,6 +298,9 @@ owning it.
    the diff files contain item names and IDs, and write the parser.
 8. **F8 character lookup by name**: after 4 Nov, and only via an allowed source.
 9. **F9 raid-level sims**: last, if single-character sims prove useful.
+10. **F10-F15 likely asks**: check each one's data first (see the table above),
+    then build the ones the data supports, in the order F11 and F10 (small,
+    sim-native), F12 and F14, then F13 and F15.
 
 Each milestone ends with a container rebuild, a gateway restart, and a test in
 Discord.

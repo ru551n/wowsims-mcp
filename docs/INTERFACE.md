@@ -355,6 +355,15 @@ deltas. The tool for "which racial / which trinket is better".
   save it with `wowsims_save_character`.
 - only via an allowed data source (Blizzard's API or an agreed route).
 
+**F10-F15 (candidate, shapes only after their data is checked; see PLAN.md):**
+`wowsims_get_stat_caps(spec, race?)`, `wowsims_get_talents(spec)` (plus talent
+overrides in `simulate`/`compare`), `wowsims_best_items_for_slot` per slot or all
+slots (upgrade finder), a BiS view per spec and phase, and
+`wowsims_recommend_consumables(spec, role)`. Crafting questions use the `sources`
+in `wowsims_get_item`. All follow the same rules: short results with a `summary`,
+sim output labelled as such, and a plain "not in the data" error instead of
+guesses.
+
 **F9 raid-level sims** extends `wowsims_simulate` / `wowsims_compare` with a
 `raid_buffs` argument; no new tools.
 
