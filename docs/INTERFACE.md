@@ -8,8 +8,12 @@ have run a real sim and seen the `RaidSimRequest` (PLAN.md, step 2).
 The caller is an LLM in a Discord chat (Lockbot, running on a local Qwen model or
 GPT), answering casual questions from non-technical users. So:
 
-- **Few tools, simple arguments.** Twelve tools in v1 (F1-F5), three more
-  provisional ones later (F6, F7, F8). The model passes names and short
+- **Few tools, simple arguments.** About 18 tools in v1 (F1 has 8, plus
+  `wowsims_help`, F2-F5 the rest), plus a few provisional ones later
+  (best-items-for-slot, F7, F8). The Discord agent already carries about 45 tools,
+  so it only gets a subset through its `tools.allow` list, descriptions are kept
+  short, and `wowsims_help` plus openclaw's `tool_search` cover discovery of the
+  rest. No single dispatcher tool. The model passes names and short
   strings, never protobuf-shaped blobs. We build the `RaidSimRequest`.
 - **Resolve, don't interrogate.** The server resolves "which character" and says
   what it resolved (`resolved_character`), so the bot can mention it.
@@ -56,6 +60,19 @@ All tools return `{ "ok": true, ... }` or an error (below). `owner` is required
 wherever a default may need resolving. Tools are grouped by feature; the feature
 numbers (F1-F9) and build order are in PLAN.md.
 
+### Tool discovery
+
+**`wowsims_help`**: find the right tool without every definition in the prompt
+(see "Keeping the tool count manageable" in PLAN.md).
+- args: `task?` (plain-language description, e.g. "where does an item drop")
+- returns: with `task`: `{matches: [{tool, description, example_call, visible_to_you?}]}` (best first, at most 3);
+  without: `{index: [{tool, one_line}]}` for all tools.
+- matching is simple keyword and similarity scoring over each tool's description
+  and a short list of example phrases kept next to the tool definition; no LLM.
+- the response notes when a matching tool is not exposed to the calling agent
+  (when the server can tell), so the bot can say it cannot do that instead of
+  guessing.
+
 ### Item lookup (F1, built first)
 
 Backed by the sim's own database (`db.json` at the pinned ref), loaded into an
@@ -65,8 +82,16 @@ in-memory index at startup. Read-only, no sim binary needed.
 Find items by name, tolerant of misspellings (see "Matching and misspellings"
 below). For "vad heter den där trinketen", and for resolving names before an
 override.
-- args: `query` (name or part of it), `slot?`, `min_quality?`, `armor_type?`,
-  `limit?` (default 5, max 25)
+- args: `query?` (name or part of it; omit to browse by filters only),
+  `slot?`, `min_quality?`, `armor_type?`, `weapon_type?`, `class?`, `faction?`,
+  `profession?`, `set?`, `ilvl_min?`, `ilvl_max?`, `has_proc?`, `has_on_use?`,
+  `limit?` (default 5, max 25), `offset?`
+- with `query` the result is the probability list below; without `query` it is a
+  plain filtered list ordered by item level (descending) with `total`,
+  `has_more`, `next_offset`, and no probabilities.
+- a trailing "of the <suffix>" in the query (e.g. "Cloak of the Eagle") is split
+  off and matched against the random-suffix table; the candidate then carries
+  `suffix`.
 - returns:
   ```json
   {
@@ -87,14 +112,49 @@ override.
   1. `status` is only an advisory label derived from those numbers (so the
   thresholds live in one place); the bot is free to ignore it.
 
-**`wowsims_get_item`**
-- args: `item` (ID, or exact name)
-- returns: `{id, name, slot, armor_type, quality, ilvl, phase, stats: {...}, effects?: [...]}`
-- errors: `ITEM_NOT_FOUND` with up to 5 near matches.
+**`wowsims_get_item`**: the full item card.
+- args: `item` (ID, or a name resolved by the fuzzy matcher), `suffix?`
+- returns: `{id, name, slot, armor_type, weapon_type?, hand_type?, weapon_speed?, quality, ilvl, phase, stats: {...}, effects: [{name, on_use?: {cooldown_s}, proc?: {ppm}, duration_s?}], set?: {id, name}, unique, restrictions: {classes?, faction?, profession?}, suffix_options?: [...], sources: [...], wowhead_url}`
+- `sources` entries: `{type: "drop", boss, zone, difficulty?}`,
+  `{type: "crafted", profession}`, `{type: "reputation", faction, standing?}`,
+  or `[{type: "unknown"}]` when the database has no source data (this means
+  "unknown", not "does not drop").
+- an unresolved name returns the same probability list as search, as an error.
+
+**`wowsims_get_loot`**: the reverse lookup.
+- args: `boss_or_zone` (fuzzy-matched, with probabilities like item search),
+  `slot?`, `class?`, `limit?`, `offset?`
+- returns: `{resolved: {type: "boss"|"zone", id, name, zone?, probability}, items: [{id, name, slot, ilvl, quality}], total, has_more, next_offset, wowhead_url}`
+
+**`wowsims_get_set`**
+- args: `name` (fuzzy-matched)
+- returns: `{id, name, class?, pieces: [{id, name, slot, ilvl, sources}], wowhead_url}`; if given an item, also `contains_item`.
+
+**`wowsims_compare_items`**
+- args: `items` (2-4: IDs or names), `suffixes?`
+- returns: `{items: [{id, name, slot, ilvl, quality}], stat_table: {stat: [values...]}, differences: [...], effects: [[...]], restrictions: [[...]], summary}`
+- error `SLOT_MISMATCH` (warning, not failure) when the slots differ.
 
 **`wowsims_search_enchants`**
-- args: `query`, `slot?`, `limit?`
-- returns: `{enchants: [{id, name, slots, stats}], total, has_more}`
+- args: `query?`, `slot?`, `limit?`
+- returns: `{enchants: [{id, name, slots, stats, probability?}], total, has_more, none_of_these?}` (with a query: probability list like item search)
+
+**`wowsims_search_consumables`**
+- args: `query?`, `type?` (potion, flask, food, ...), `class?`, `limit?`
+- returns: `{consumables: [{id, name, type, level, stats, effects, probability?}], total, has_more, none_of_these?}`
+
+**`wowsims_get_wowhead_link`**
+- args: `kind` (`item`, `spell`, `npc`, `zone`, `item-set`), `id_or_name`
+- returns: `{url, kind, id, name, verified: false}`; the base path comes from
+  `WOWHEAD_BASE`. Links are generated, never fetched. A name is resolved with
+  the fuzzy matcher, so the result can be a probability list as an error.
+- every item, enchant, consumable, set, boss and zone result also carries its
+  own `wowhead_url`.
+
+**`wowsims_best_items_for_slot`** (after F3): rank items for a slot by the stat
+weights from `wowsims_stat_weights`.
+- args: `owner`, `character?`, `slot`, `limit?`
+- returns: `{ranked: [{id, name, ilvl, score, delta_vs_equipped}], summary}`
 
 Name resolution used by every override (F2 onward) is the same resolver as
 `wowsims_search_items`: `exact` and `confident` resolve silently (the tool
@@ -280,11 +340,7 @@ deltas. The tool for "which racial / which trinket is better".
 
 ### Later features (provisional, shapes may change)
 
-**`wowsims_get_item_sources`** (F6): where an item drops.
-- args: `item`
-- returns: `{item, sources: [{type, boss?, zone?, phase?}], summary}`
-- only built if `db.json` links items to NPCs/zones. Otherwise the bot falls back
-  to web search and this tool is dropped.
+(F6 item sources moved into F1: see `wowsims_get_item` and `wowsims_get_loot`.)
 
 **`wowsims_get_patch_changes`** (F7): what changed recently.
 - args: `item_or_spell?`, `since_patch?`, `limit?`
@@ -338,10 +394,16 @@ Codes: `ITEM_NOT_FOUND`, `NO_CHARACTERS`, `AMBIGUOUS_CHARACTER`, `CHARACTER_NOT_
 
 | Tool | readOnly | destructive | idempotent | openWorld |
 | --- | --- | --- | --- | --- |
+| `wowsims_help` | true | false | true | false |
 | `wowsims_search_items` | true | false | true | false |
 | `wowsims_get_item` | true | false | true | false |
 | `wowsims_search_enchants` | true | false | true | false |
-| `wowsims_get_item_sources` (F6) | true | false | true | false |
+| `wowsims_get_loot` | true | false | true | false |
+| `wowsims_get_set` | true | false | true | false |
+| `wowsims_compare_items` | true | false | true | false |
+| `wowsims_search_consumables` | true | false | true | false |
+| `wowsims_get_wowhead_link` | true | false | true | false |
+| `wowsims_best_items_for_slot` (after F3) | true | false | true | false |
 | `wowsims_get_patch_changes` (F7) | true | false | true | true |
 | `wowsims_lookup_character` (F8) | true | false | true | true |
 | `wowsims_list_specs` | true | false | true | false |

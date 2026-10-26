@@ -82,12 +82,12 @@ a milestone that is useful on its own:
 
 | # | Feature | Tools | Data source | Needs the sim binary? |
 | --- | --- | --- | --- | --- |
-| F1 | **Item lookup (first)**: find items and enchants by name, slot, quality; resolve names to IDs | `wowsims_search_items`, `wowsims_get_item`, `wowsims_search_enchants` | `assets/database/db.json` from `wowsims/forever` at the pinned ref (8,656 items, 246 enchants, consumables, zones, NPCs, encounters, as of 2026-10-26) | No |
+| F1 | **Item lookup (first)**: misspelling-tolerant search with probabilities; filter/browse without a name; full item card (stats, effects, set, restrictions, sources); loot by boss or zone; random-suffix variants; sets; side-by-side compare; enchants and consumables; Wowhead links. Details in "F1 feature set" below | `wowsims_search_items`, `wowsims_get_item`, `wowsims_get_loot`, `wowsims_get_set`, `wowsims_compare_items`, `wowsims_search_enchants`, `wowsims_search_consumables`, `wowsims_get_wowhead_link` | `assets/database/db.json` from `wowsims/forever` at the pinned ref (8,656 items, 246 enchants, consumables, zones, NPCs, encounters, as of 2026-10-26) | No |
 | F2 | **Single sims**: DPS for a preset spec, with overrides (race, items by name or ID, talents) | `wowsims_list_specs`, `wowsims_simulate` | pinned `wowsimcli` | Yes |
 | F3 | **Comparisons**: which racial/item/enchant is better, with noise flagging; stat weights | `wowsims_compare`, `wowsims_stat_weights` | pinned `wowsimcli` | Yes |
 | F4 | **Characters**: store several characters per Discord user, with a default | `wowsims_save_character`, `wowsims_list_characters`, `wowsims_get_character`, `wowsims_set_default_character`, `wowsims_delete_character` | SQLite | No (sims then use them) |
 | F5 | **Gear import**: exporter addon string or wowsims UI JSON into a character | `wowsims_save_character` (`source=exporter` or `sim_json`) | user paste | Yes (to validate) |
-| F6 | **Item sources**: where an item drops, which boss/zone | `wowsims_get_item_sources` | zones/NPCs/encounters tables in `db.json`, if they link to items (to verify); otherwise the bot uses web search | No |
+| F6 | **Item sources**: merged into F1 (`wowsims_get_item` card and `wowsims_get_loot`); `db.json` has source data for 2,875 items and all 625 drop sources link to a named boss and zone | see F1 | `db.json` | No |
 | F7 | **Patch changes**: what changed for an item/spell in recent patches | `wowsims_get_patch_changes` | `wowsims/gamedata` (`patches/<version>/CHANGES.md`, `items-changed.diff`), **fetched at runtime from the public repo, never bundled** (see Decisions) | No |
 | F8 | **Character lookup by name** (after 4 Nov): fetch gear for a character without a paste | `wowsims_lookup_character` | an allowed source only: Blizzard's API, or a supported route agreed with the armorywowforever.com owner. Never its `/api/` (robots.txt) | Yes (to validate) |
 | F9 | **Raid-level sims**: buffs and debuffs from other classes in the raid | extend `wowsims_simulate` / `wowsims_compare` | pinned `wowsimcli` | Yes |
@@ -102,6 +102,88 @@ item first for 93-96% of generated typos and in the top five for 98%.
 Caveat found while prototyping: `db.json` holds only phase 1 items (all 8,656),
 and some well-known Classic items (Ashkandi, Bloodfang, Nightslayer) are not in
 it. `not_found` therefore means "not in the sim database", never "no such item".
+
+### F1 feature set
+
+What `db.json` supports (checked 2026-10-26): 8,656 items, of which 2,875 have
+source data (1,943 crafted, 625 drops, 307 reputation; all 625 drops link to a
+named NPC and zone), 1,058 in 186 sets, 1,433 with class restrictions, 689 with
+on-use or proc effects, 1,641 with random-suffix options; plus 436 consumables
+and 246 enchants. Items without source data (e.g. Thunderfury) report
+"source unknown", never "does not drop".
+
+Each item below is part of F1 and has its own acceptance tests:
+
+1. **Misspelling-tolerant search with probabilities** (the matcher in
+   INTERFACE.md): `wowsims_search_items(query)`.
+2. **Browse and filter without a name**: the same tool with `query` optional and
+   filters for class, slot, weapon type, quality, item-level range, faction,
+   profession, set, and has-proc/has-on-use. Example: "rogue daggers ilvl 60+".
+3. **Full item card**: `wowsims_get_item` returns stats, weapon speed, on-use
+   and proc effects (cooldown, ppm), set, unique flag, class/faction/profession
+   restrictions, and random-suffix options.
+4. **Item sources** inside the card: drop (boss, zone, difficulty), crafted
+   (profession), reputation (faction), or "unknown".
+5. **Loot by boss or zone**: `wowsims_get_loot(boss_or_zone)`, the reverse lookup
+   ("what drops from Edwin VanCleef"); the name is matched with the same fuzzy
+   resolver and probabilities.
+6. **Random-suffix variants**: "Cloak of the Eagle" resolves to the base item
+   plus the suffix (the matcher splits a trailing "of the X" and checks it against
+   the suffix table), and the result carries `suffix`.
+7. **Sets**: `wowsims_get_set(name)` lists the pieces, class, and which pieces
+   an item belongs to (186 sets).
+8. **Side-by-side compare**: `wowsims_compare_items(items[])` shows stat
+   differences, item level, effects and restrictions, before the sim exists.
+9. **Consumables and enchants**: `wowsims_search_consumables` (436: potions,
+   flasks, food, with effects and class restrictions) and `wowsims_search_enchants`
+   (246, by slot); same fuzzy resolver.
+10. **Best items for a slot** (after F3): rank items for a slot by the stat
+    weights from `wowsims_stat_weights`. Not part of the first F1 release.
+11. **Wowhead links**: every item, enchant, set, consumable, NPC and zone result
+    carries a `wowhead_url`, and `wowsims_get_wowhead_link(kind, id_or_name)`
+    builds one for any of them (kinds: item, spell, npc, zone, item-set).
+    - We only **generate links**; we never fetch Wowhead (its `robots.txt`
+      disallows AI crawlers, and the bot does not need the content).
+    - Base path is configurable (`WOWHEAD_BASE`). Probed 2026-10-26:
+      `https://www.wowhead.com/forever/item=<id>` answers 403 to a scripted
+      request while unrelated paths answer 404, so the route likely exists but is
+      **unverified**; check it in a browser before relying on it. Fallback is the
+      closest era path (`/classic/`), clearly labelled as such.
+    - Links go out wrapped in `<...>` to suppress Discord embeds when several are
+      posted (per the bot's `AGENTS.md`).
+    - Open check: Wowhead item IDs are assumed to equal the sim's IDs (same
+      client data); verify with a handful of items.
+
+### Keeping the tool count manageable
+
+F1 is 8 tools (search, get, loot, set, compare, enchants, consumables, link), and
+the whole v1 is about 17. The openclaw `discord` agent already carries about 45
+tools, which is a lot for a local model. Three measures, all in the plan (no
+single-dispatcher tool such as `wowsims_call(tool, args)`: the client would see no
+argument schemas, small models would guess arguments, and we would lose per-tool
+validation and annotations):
+
+1. **Per-agent allowlist.** The `discord` agent has an explicit `tools.allow` list
+   in `openclaw.json` (wildcards such as `warcraftlogs__*` are supported), so new
+   tools are invisible to it until added. Expose to the Discord agent only what it
+   needs: `wowsims_search_items`, `wowsims_get_item`, `wowsims_get_loot`,
+   `wowsims_get_wowhead_link`, `wowsims_simulate`, `wowsims_compare`, and
+   `wowsims_help`. Everything else (character management, sets, consumables,
+   enchants, compare_items, ...) stays hidden from it, or goes to another agent.
+   Revisit the list per milestone. Allowlist edits hot-reload, but a gateway
+   restart is needed after the MCP container changes.
+2. **openclaw's `tool_search`.** The `discord` agent's allowlist already includes
+   `tool_search`. Step 0 checks how it behaves (does it hide tool definitions
+   until they are searched for?). If it loads definitions on demand, allow the
+   whole `wowsims__*` set and let the agent find tools through it; if not, rely
+   on measures 1 and 3.
+3. **`wowsims_help(task?)`**, a small read-only tool in our server. Given a plain
+   description ("find where an item drops", "compare two racials") it returns the
+   matching tool names, a one-line description and an example call; with no
+   argument it returns a short index of all tools. It exists so the bot can
+   discover the hidden tools without every definition sitting in the prompt, and
+   it still helps if `tool_search` does not do what we hope. Keep every tool
+   description short.
 
 How F1 feeds the rest: once F1 exists, every `items`/`enchants` override in F2,
 F3 and F5 accepts a name as well as an ID. An exact match resolves; an
@@ -152,24 +234,32 @@ owning it.
    reimplementing the whole UI importer?
 5. Where does the project run (container on this box, same network as the other
    MCP servers)?
-6. Do `db.json`'s zones/NPCs/encounters tables link to items (needed for F6)?
+6. Is the Wowhead Forever route (`/forever/item=<id>`) valid, and do Wowhead IDs
+   match the sim's item IDs? (Check in a browser.) The question of whether
+   `db.json` links items to bosses is answered: yes for all 625 drop sources.
    (Coverage of `db.json` itself is trusted, see Decisions.)
 7. Do the `gamedata` patch files (`items-changed.diff`, `CHANGES.md`) contain item
    names and IDs, and how big are they (needed for F7 and its runtime fetch)?
 
 ## Milestones
 
-0. **Checks (read-only).** Open questions 1 and 2 from the repo. Pin the tag and
+0. **Checks (read-only).** Open questions 1 and 2 from the repo. Check how
+   openclaw's `tool_search` works (docs or source) and whether per-agent
+   `tools.allow` also applies to MCP tools added later. Pin the tag and
    commit SHA to use. Inspect `db.json` (done at a high level: items have id,
    name, slot type, armor type, quality, phase, ilvl, stats).
 1. **F1 item lookup.** Scaffold the Python/FastMCP server (stateless streamable
    HTTP). Fetch `db.json` at the pinned ref at image build time, build an
    in-memory index with the misspelling-tolerant matcher (status levels
    exact/confident/ambiguous/suggestions/not_found, slot/quality filters) and
-   its test benchmark. Tools: `wowsims_search_items`, `wowsims_get_item`,
-   `wowsims_search_enchants`. No Go toolchain or sim binary
-   needed. Containerise, register in `openclaw.json`, add a `TOOLS.md` section,
-   restart the gateway, test from Discord.
+   its test benchmark. Tools: the full F1 feature set above (items 1-9 and 11;
+   item 10 waits for F3). Build in this order inside the milestone: search and
+   matcher, item card with sources, filters, loot, suffixes, sets, compare,
+   consumables/enchants, Wowhead links. No Go toolchain or sim binary
+   needed. Include `wowsims_help`. Containerise, register in `openclaw.json`, add
+   only the Discord-needed tools to the `discord` agent's `tools.allow` (see
+   "Keeping the tool count manageable"), add a `TOOLS.md` section, restart the
+   gateway, test from Discord.
 2. **Sim build.** Clone `wowsims/forever` at the pinned ref, build `wowsimcli`
    (note the toolchain it needs), run one sim by hand with a preset JSON. Add the
    build stage to the Dockerfile.
@@ -180,8 +270,7 @@ owning it.
 5. **F4 characters.** SQLite storage and the character tools; `owner` resolution.
 6. **F5 gear import.** Exporter string or UI JSON, whichever step 0 confirms,
    with warnings for anything unmapped.
-7. **F6 item sources**: only if `db.json`'s zones/NPCs/encounters link to items
-   (check first). **F7 patch changes**: runtime fetch from `wowsims/gamedata`
+7. **F6 item sources**: done inside F1 (see above). **F7 patch changes**: runtime fetch from `wowsims/gamedata`
    with a short-lived volume cache, not bundled (see Decisions); first confirm
    the diff files contain item names and IDs, and write the parser.
 8. **F8 character lookup by name**: after 4 Nov, and only via an allowed source.
