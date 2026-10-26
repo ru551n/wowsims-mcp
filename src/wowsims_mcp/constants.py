@@ -1,0 +1,128 @@
+SIM_REF = "v0.0.140"
+SIM_COMMIT = "f02667f7bcc542d600a3cb924dc7b86a9e856495"
+DATABASE_URL = (
+    "https://raw.githubusercontent.com/wowsims/forever/"
+    f"{SIM_COMMIT}/assets/database/db.json"
+)
+
+SLOTS = {
+    0: "unknown",
+    1: "head",
+    2: "neck",
+    3: "shoulder",
+    4: "back",
+    5: "chest",
+    6: "wrist",
+    7: "hands",
+    8: "waist",
+    9: "legs",
+    10: "feet",
+    11: "finger",
+    12: "trinket",
+    13: "weapon",
+    14: "ranged",
+}
+ARMOR_TYPES = {0: "unknown", 1: "cloth", 2: "leather", 3: "mail", 4: "plate"}
+WEAPON_TYPES = {
+    0: "unknown",
+    1: "axe",
+    2: "dagger",
+    3: "fist",
+    4: "mace",
+    5: "off-hand",
+    6: "polearm",
+    7: "shield",
+    8: "staff",
+    9: "sword",
+}
+RANGED_WEAPON_TYPES = {
+    1: "bow",
+    2: "crossbow",
+    3: "gun",
+    4: "thrown",
+    5: "wand",
+    6: "idol",
+    7: "libram",
+    8: "totem",
+    9: "sigil",
+}
+HAND_TYPES = {1: "main-hand", 2: "one-hand", 3: "off-hand", 4: "two-hand"}
+QUALITIES = {
+    0: "junk",
+    1: "common",
+    2: "uncommon",
+    3: "rare",
+    4: "epic",
+    5: "legendary",
+    6: "artifact",
+    7: "heirloom",
+}
+CLASSES = {
+    1: "warrior",
+    2: "paladin",
+    3: "hunter",
+    4: "rogue",
+    5: "priest",
+    7: "shaman",
+    8: "mage",
+    9: "warlock",
+    11: "druid",
+}
+PROFESSIONS = {
+    1: "alchemy",
+    2: "blacksmithing",
+    3: "enchanting",
+    4: "engineering",
+    5: "herbalism",
+    6: "inscription",
+    7: "jewelcrafting",
+    8: "leatherworking",
+    9: "mining",
+    10: "skinning",
+    11: "tailoring",
+}
+FACTIONS = {1: "alliance", 2: "horde"}
+STATS = {
+    0: "strength",
+    1: "agility",
+    2: "stamina",
+    3: "intellect",
+    4: "healing_power",
+    5: "spell_damage",
+    6: "arcane_damage",
+    7: "fire_damage",
+    8: "frost_damage",
+    9: "holy_damage",
+    10: "nature_damage",
+    11: "shadow_damage",
+    12: "spell_hit_rating",
+    13: "spell_crit_rating",
+    14: "spell_haste_rating",
+    15: "spell_penetration",
+    16: "spirit",
+    17: "attack_power",
+    18: "ranged_attack_power",
+    19: "feral_attack_power",
+    20: "melee_hit_rating",
+    21: "melee_crit_rating",
+    22: "melee_haste_rating",
+    23: "armor_penetration",
+    24: "expertise_rating",
+    25: "defense_rating",
+    26: "block_rating",
+    27: "block_value",
+    28: "dodge_rating",
+    29: "parry_rating",
+    30: "resilience_rating",
+    31: "armor",
+    32: "bonus_armor",
+    33: "health",
+    34: "mana",
+    35: "mp5",
+    36: "arcane_resistance",
+    37: "fire_resistance",
+    38: "frost_resistance",
+    39: "nature_resistance",
+    40: "shadow_resistance",
+    41: "physical_damage",
+}
