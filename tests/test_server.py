@@ -19,6 +19,12 @@ async def test_mcp_lists_annotated_tools() -> None:
     assert {tool.name for tool in tools} == {
         "wowsims_search_items",
         "wowsims_get_item",
+        "wowsims_get_loot",
+        "wowsims_get_set",
+        "wowsims_compare_items",
+        "wowsims_search_enchants",
+        "wowsims_search_consumables",
+        "wowsims_get_wowhead_link",
         "wowsims_help",
     }
     assert all(tool.annotations and tool.annotations.readOnlyHint for tool in tools)

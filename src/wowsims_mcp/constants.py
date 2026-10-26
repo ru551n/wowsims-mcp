@@ -82,6 +82,20 @@ PROFESSIONS = {
     11: "tailoring",
 }
 FACTIONS = {1: "alliance", 2: "horde"}
+CONSUMABLE_TYPES = {
+    0: "unknown",
+    1: "potion",
+    2: "flask",
+    3: "food",
+    4: "scroll",
+    5: "explosive",
+    6: "battle_elixir",
+    7: "guardian_elixir",
+    8: "imbue",
+    9: "pet_food",
+    10: "other",
+    11: "herb",
+}
 STATS = {
     0: "strength",
     1: "agility",

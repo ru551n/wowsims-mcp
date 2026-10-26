@@ -3,7 +3,7 @@ name = "wowsims-mcp"
 version = "0.1.0"
 description = "MCP tools for looking up World of Warcraft items in the wowsims database"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "MIT"
 dependencies = [
     "mcp>=1.29,<2",
     "pydantic>=2.0",
@@ -18,6 +18,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+wowsims_mcp = ["calibration.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

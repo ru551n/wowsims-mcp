@@ -85,6 +85,44 @@ def database() -> GameDatabase:
                     weaponType=2,
                     sources=[{"drop": {"npcId": 10, "zoneId": 20}}],
                 ),
+                item(
+                    5,
+                    "Cogspinner Goggles",
+                    type=1,
+                    randomSuffixOptions=[-6],
+                    scalingOptions={
+                        "0": {"ilvl": 106, "randPropPoints": 59, "stats": {"31": 220}}
+                    },
+                ),
+                item(
+                    6,
+                    "Imperial Plate Chest",
+                    type=5,
+                    setId=321,
+                    setName="Imperial Plate",
+                ),
+                item(
+                    7,
+                    "Imperial Plate Boots",
+                    type=10,
+                    setId=321,
+                    setName="Imperial Plate",
+                ),
+            ],
+            "randomSuffixes": [
+                {"id": -6, "name": "of the Eagle", "stats": [0, 0, 10000, 6666]}
+            ],
+            "enchants": [
+                {
+                    "effectId": 368,
+                    "spellId": 9102,
+                    "name": "Enchant Cloak - Greater Agility",
+                    "type": 4,
+                    "stats": [0, 12],
+                }
+            ],
+            "consumables": [
+                {"id": 7676, "name": "Thistle Tea", "type": 3, "stats": []}
             ],
             "npcs": [{"id": 10, "name": "General Drakkisath", "zoneId": 20}],
             "zones": [{"id": 20, "name": "Blackrock Spire"}],

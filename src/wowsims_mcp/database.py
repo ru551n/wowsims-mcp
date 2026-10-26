@@ -9,6 +9,7 @@ from typing import Any
 from .constants import (
     ARMOR_TYPES,
     CLASSES,
+    CONSUMABLE_TYPES,
     DATABASE_URL,
     FACTIONS,
     HAND_TYPES,
@@ -89,7 +90,29 @@ class GameDatabase:
         self.suffixes = {
             suffix["id"]: suffix for suffix in data.get("randomSuffixes", [])
         }
+        self.enchants: list[dict[str, Any]] = data.get("enchants", [])
+        self.consumables: list[dict[str, Any]] = data.get("consumables", [])
         self.matcher = NameMatcher([item["name"] for item in self.items])
+        self.loot_names: list[str] = []
+        self.loot_targets: list[tuple[str, int]] = []
+        for npc_id, npc in self.npcs.items():
+            self.loot_names.append(npc["name"])
+            self.loot_targets.append(("boss", npc_id))
+        for zone_id, zone in self.zones.items():
+            self.loot_names.append(zone["name"])
+            self.loot_targets.append(("zone", zone_id))
+        self.loot_matcher = NameMatcher(self.loot_names)
+        self.sets: dict[int, list[dict[str, Any]]] = {}
+        for item in self.items:
+            if item.get("setId"):
+                self.sets.setdefault(item["setId"], []).append(item)
+        self.set_ids = list(self.sets)
+        self.set_matcher = NameMatcher(
+            [
+                self.sets[set_id][0].get("setName", str(set_id))
+                for set_id in self.set_ids
+            ]
+        )
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> GameDatabase:
@@ -188,7 +211,9 @@ class GameDatabase:
             result.append(value)
         return result
 
-    def item_card(self, item: dict[str, Any]) -> dict[str, Any]:
+    def item_card(
+        self, item: dict[str, Any], suffix: str | int | None = None
+    ) -> dict[str, Any]:
         scaling = item.get("scalingOptions", {}).get("0", {})
         card = self.summary(item)
         card.update(
@@ -234,7 +259,48 @@ class GameDatabase:
                 for suffix_id in item["randomSuffixOptions"]
                 if suffix_id in self.suffixes
             ]
+        if suffix is not None:
+            card["suffix"] = self.resolve_suffix(item, suffix)
+            card["name"] = f"{item['name']} {card['suffix']['name']}"
+            points = scaling.get("randPropPoints")
+            if points is not None:
+                for stat, coefficient in card["suffix"].pop("coefficients").items():
+                    card["stats"][stat] = (
+                        card["stats"].get(stat, 0) + points * coefficient / 10000
+                    )
         return {key: value for key, value in card.items() if value is not None}
+
+    def resolve_suffix(
+        self, item: dict[str, Any], reference: str | int
+    ) -> dict[str, Any]:
+        options = item.get("randomSuffixOptions", [])
+        suffix_id: int | None = None
+        if isinstance(reference, int):
+            suffix_id = reference
+        else:
+            try:
+                suffix_id = int(reference)
+            except ValueError:
+                wanted = normalize(reference)
+                matches = [
+                    candidate
+                    for candidate in options
+                    if candidate in self.suffixes
+                    and normalize(self.suffixes[candidate]["name"]) == wanted
+                ]
+                if len(matches) == 1:
+                    suffix_id = matches[0]
+        if suffix_id not in options or suffix_id not in self.suffixes:
+            raise DatabaseError(
+                f"Suffix {reference!r} is not valid for {item['name']}. "
+                "Use one of suffix_options."
+            )
+        suffix = self.suffixes[suffix_id]
+        return {
+            "id": suffix_id,
+            "name": suffix["name"],
+            "coefficients": _stats(suffix.get("stats")),
+        }
 
     def _matches_filters(self, item: dict[str, Any], filters: SearchFilters) -> bool:
         scaling = item.get("scalingOptions", {}).get("0", {})
@@ -308,6 +374,27 @@ class GameDatabase:
                 "next_offset": offset + limit if offset + limit < total else None,
                 "summary": f"{total} items match the filters.",
             }
+        suffix: dict[str, Any] | None = None
+        if query:
+            for item in self.items:
+                if not item.get("randomSuffixOptions"):
+                    continue
+                for suffix_id in item["randomSuffixOptions"]:
+                    suffix_row = self.suffixes.get(suffix_id)
+                    if not suffix_row:
+                        continue
+                    ending = f" {suffix_row['name']}"
+                    if query.lower().endswith(ending.lower()):
+                        base_query = query[: -len(ending)]
+                        if normalize(base_query) == normalize(item["name"]):
+                            query = base_query
+                            suffix = {
+                                "id": suffix_id,
+                                "name": suffix_row["name"],
+                            }
+                            break
+                if suffix:
+                    break
         eligible = {
             index
             for index, item in enumerate(self.items)
@@ -329,6 +416,9 @@ class GameDatabase:
             candidate["same_name_count"] = sum(
                 other["name"] == item["name"] for other in self.items
             )
+            if suffix:
+                candidate["suffix"] = suffix
+                candidate["name"] = f"{candidate['name']} {suffix['name']}"
             candidates.append(candidate)
         if exact and len(exact) == 1:
             status = "exact"
@@ -355,6 +445,272 @@ class GameDatabase:
             "candidates": candidates,
             "none_of_these": round(none, 4),
             "summary": summary,
+        }
+
+    def _fuzzy_rows(
+        self,
+        query: str | None,
+        rows: list[dict[str, Any]],
+        output_key: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 25:
+            raise DatabaseError("limit must be between 1 and 25.")
+        if not query or not query.strip():
+            return {
+                "ok": True,
+                output_key: rows[:limit],
+                "total": len(rows),
+                "has_more": len(rows) > limit,
+            }
+        matcher = NameMatcher([row["name"] for row in rows])
+        matches = matcher.match(query, limit=limit)
+        exact = [match for match in matches if match.exact]
+        matches = exact or matches
+        chances, none = probabilities(match.score for match in matches)
+        results = []
+        for match, chance in zip(matches, chances, strict=True):
+            row = dict(rows[match.index])
+            row["probability"] = round(chance, 4)
+            results.append(row)
+        status = (
+            "exact"
+            if len(exact) == 1
+            else "not_found"
+            if none >= 0.8 or not results
+            else "confident"
+            if results[0]["probability"] >= 0.85
+            else "suggestions"
+        )
+        return {
+            "ok": True,
+            "status": status,
+            output_key: results,
+            "total": len(results),
+            "has_more": False,
+            "none_of_these": round(none, 4),
+        }
+
+    def search_enchants(
+        self, query: str | None = None, slot: str | None = None, limit: int = 5
+    ) -> dict[str, Any]:
+        selected_slot = _choice(slot, SLOTS, "slot")
+        rows = []
+        for enchant in self.enchants:
+            slots = [SLOTS.get(enchant.get("type", 0), "unknown")]
+            slots.extend(
+                SLOTS.get(value, "unknown") for value in enchant.get("extraTypes", [])
+            )
+            if selected_slot and selected_slot not in slots:
+                continue
+            rows.append(
+                {
+                    "id": enchant["effectId"],
+                    "spell_id": enchant.get("spellId"),
+                    "name": enchant["name"],
+                    "slots": slots,
+                    "stats": _stats(enchant.get("stats")),
+                    "wowhead_url": wowhead_url("spell", enchant["spellId"]),
+                }
+            )
+        return self._fuzzy_rows(query, rows, "enchants", limit)
+
+    def search_consumables(
+        self,
+        query: str | None = None,
+        consumable_type: str | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        rows = []
+        for consumable in self.consumables:
+            kind = CONSUMABLE_TYPES.get(consumable.get("type", 0), "unknown")
+            if consumable_type and normalize(consumable_type).replace(" ", "_") != kind:
+                continue
+            rows.append(
+                {
+                    "id": consumable["id"],
+                    "name": consumable["name"],
+                    "type": kind,
+                    "stats": _stats(consumable.get("stats")),
+                    "duration_s": consumable.get("buffDuration"),
+                    "cooldown_s": consumable.get("cooldownDuration"),
+                    "effect_ids": consumable.get("effectIds", []),
+                    "wowhead_url": wowhead_url("item", consumable["id"]),
+                }
+            )
+        return self._fuzzy_rows(
+            query,
+            rows,
+            "consumables",
+            limit,
+        )
+
+    def get_loot(
+        self,
+        reference: str,
+        slot: str | None = None,
+        character_class: str | None = None,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 100 or offset < 0:
+            raise DatabaseError("limit must be 1-100 and offset must not be negative.")
+        matches = self.loot_matcher.match(reference, limit=5)
+        exact = [match for match in matches if match.exact]
+        matches = exact or matches[:1]
+        chances, _ = probabilities(match.score for match in matches)
+        if (
+            not matches
+            or len(exact) != 1
+            or (not exact and (matches[0].score < 55 or chances[0] < 0.85))
+        ):
+            raise DatabaseError(
+                f"No unique boss or zone confidently matches {reference!r}; "
+                "try more of its name."
+            )
+        match = matches[0]
+        kind, identifier = self.loot_targets[match.index]
+        filters = make_filters(slot=slot, character_class=character_class)
+        found = []
+        for item in self.items:
+            if not self._matches_filters(item, filters):
+                continue
+            for wrapper in item.get("sources", []):
+                source = wrapper.get("drop")
+                if source and (
+                    (kind == "boss" and source.get("npcId") == identifier)
+                    or (kind == "zone" and source.get("zoneId") == identifier)
+                ):
+                    found.append(item)
+                    break
+        found.sort(key=lambda item: self.summary(item)["ilvl"], reverse=True)
+        target = self.npcs[identifier] if kind == "boss" else self.zones[identifier]
+        resolved: dict[str, Any] = {
+            "type": kind,
+            "id": identifier,
+            "name": target["name"],
+            "probability": 1.0 if exact else probabilities([match.score])[0][0],
+            "wowhead_url": wowhead_url("npc" if kind == "boss" else "zone", identifier),
+        }
+        if kind == "boss":
+            zone = self.zones.get(target["zoneId"]) if "zoneId" in target else None
+            if zone:
+                resolved["zone"] = zone["name"]
+        return {
+            "ok": True,
+            "resolved": resolved,
+            "items": [self.summary(item) for item in found[offset : offset + limit]],
+            "total": len(found),
+            "has_more": offset + limit < len(found),
+            "next_offset": offset + limit if offset + limit < len(found) else None,
+            "wowhead_url": resolved["wowhead_url"],
+        }
+
+    def get_set(self, reference: str | int) -> dict[str, Any]:
+        set_id: int | None = None
+        if isinstance(reference, int) or reference.isdigit():
+            set_id = int(reference)
+        else:
+            matches = self.set_matcher.match(reference, limit=5)
+            exact = [match for match in matches if match.exact]
+            if exact:
+                set_id = self.set_ids[exact[0].index]
+            elif matches and matches[0].score >= 65:
+                set_id = self.set_ids[matches[0].index]
+        if set_id not in self.sets:
+            raise DatabaseError(f"No item set confidently matches {reference!r}.")
+        assert set_id is not None
+        pieces = sorted(
+            self.sets[set_id], key=lambda item: (item.get("type", 0), item["name"])
+        )
+        classes = sorted(
+            {
+                CLASSES.get(value, f"class_{value}")
+                for item in pieces
+                for value in item.get("classAllowlist", [])
+            }
+        )
+        return {
+            "ok": True,
+            "id": set_id,
+            "name": pieces[0].get("setName"),
+            "classes": classes,
+            "pieces": [
+                {**self.summary(item), "sources": self.sources(item)} for item in pieces
+            ],
+            "wowhead_url": wowhead_url("item-set", set_id),
+        }
+
+    def compare_items(
+        self, references: list[str | int], suffixes: list[str | int] | None = None
+    ) -> dict[str, Any]:
+        if not 2 <= len(references) <= 4:
+            raise DatabaseError("Compare between 2 and 4 items.")
+        if suffixes is not None and len(suffixes) != len(references):
+            raise DatabaseError("Provide one suffix per item, or omit suffixes.")
+        cards = [
+            self.item_card(
+                self.resolve(reference), suffixes[index] if suffixes else None
+            )
+            for index, reference in enumerate(references)
+        ]
+        stat_names = sorted({stat for card in cards for stat in card["stats"]})
+        stat_table = {
+            stat: [card["stats"].get(stat, 0) for card in cards] for stat in stat_names
+        }
+        differences = [
+            {
+                "stat": stat,
+                "values": values,
+                "deltas_vs_first": [value - values[0] for value in values],
+            }
+            for stat, values in stat_table.items()
+        ]
+        slots = {card["slot"] for card in cards}
+        return {
+            "ok": True,
+            "warning": "SLOT_MISMATCH" if len(slots) > 1 else None,
+            "items": [
+                {key: card[key] for key in ("id", "name", "slot", "ilvl", "quality")}
+                for card in cards
+            ],
+            "stat_table": stat_table,
+            "differences": differences,
+            "effects": [card["effects"] for card in cards],
+            "restrictions": [card["restrictions"] for card in cards],
+            "summary": f"Compared {len(cards)} items across {len(stat_names)} stats.",
+        }
+
+    def get_wowhead_link(self, kind: str, reference: str | int) -> dict[str, Any]:
+        if kind not in {"item", "spell", "npc", "zone", "item-set"}:
+            raise DatabaseError("kind must be item, spell, npc, zone, or item-set.")
+        identifier: int
+        name: str | None = None
+        if isinstance(reference, int) or reference.isdigit():
+            identifier = int(reference)
+        elif kind == "item":
+            item = self.resolve(reference)
+            identifier, name = item["id"], item["name"]
+        elif kind == "item-set":
+            result = self.get_set(reference)
+            identifier, name = result["id"], result["name"]
+        else:
+            table = self.npcs if kind == "npc" else self.zones if kind == "zone" else {}
+            matches = [
+                row
+                for row in table.values()
+                if normalize(row["name"]) == normalize(reference)
+            ]
+            if len(matches) != 1:
+                raise DatabaseError(f"Provide an exact {kind} name or numeric ID.")
+            identifier, name = matches[0]["id"], matches[0]["name"]
+        return {
+            "ok": True,
+            "url": wowhead_url(kind, identifier),
+            "kind": kind,
+            "id": identifier,
+            "name": name,
+            "verified": False,
         }
 
     def resolve(self, reference: str | int) -> dict[str, Any]:

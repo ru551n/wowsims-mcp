@@ -1,0 +1,10 @@
+{
+  "sim_commit": "f02667f7bcc542d600a3cb924dc7b86a9e856495",
+  "benchmark_seed": 20261027,
+  "split_seed": 42,
+  "training_queries": 251,
+  "held_out_queries": 252,
+  "temperature": 1.0,
+  "none_offset": 20.0,
+  "note": "Two-constant softmax fitted on generated one/two-typo queries and ten unknown-item queries. Low-confidence bins are sparse; probabilities are advisory."
+}
