@@ -1,0 +1,4 @@
+# runtime data and caches (SQLite, fetched third-party data); never committed
+data/
+cache/
+*.db
