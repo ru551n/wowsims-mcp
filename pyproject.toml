@@ -20,7 +20,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-wowsims_mcp = ["calibration.json"]
+wowsims_mcp = ["calibration.json", "presets.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

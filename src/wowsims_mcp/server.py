@@ -10,6 +10,14 @@ from pydantic import Field
 
 from .constants import SIM_COMMIT, SIM_REF
 from .database import DatabaseError, GameDatabase, make_filters
+from .presets import build_request, list_specs, load_presets
+from .simulation import (
+    SimulationError,
+    SimulationRunner,
+    SimulationTimeout,
+    SimulationUnavailable,
+    simulation_summary,
+)
 
 mcp = FastMCP(
     "wowsims_mcp",
@@ -17,7 +25,8 @@ mcp = FastMCP(
         "Look up World of Warcraft items in the pinned wowsims database. "
         "Search accepts misspellings and returns probabilities; ask the user "
         "when the result is ambiguous. Not found means absent from this database, "
-        "not that the item does not exist. Simulation is not implemented yet."
+        "not that the item does not exist. Use wowsims_list_specs and "
+        "wowsims_simulate for single-player DPS simulations with no raid buffs."
     ),
     host=os.environ.get("WOWSIMS_MCP_HOST", "0.0.0.0"),
     port=int(os.environ.get("WOWSIMS_MCP_PORT", "8000")),
@@ -25,6 +34,8 @@ mcp = FastMCP(
     json_response=True,
 )
 _database: GameDatabase | None = None
+_presets: dict[str, Any] | None = None
+_runner: SimulationRunner | None = None
 READ_ONLY = ToolAnnotations(
     readOnlyHint=True,
     destructiveHint=False,
@@ -38,6 +49,20 @@ def get_database() -> GameDatabase:
     if _database is None:
         _database = GameDatabase.load()
     return _database
+
+
+def get_presets() -> dict[str, Any]:
+    global _presets
+    if _presets is None:
+        _presets = load_presets()
+    return _presets
+
+
+def get_runner() -> SimulationRunner:
+    global _runner
+    if _runner is None:
+        _runner = SimulationRunner()
+    return _runner
 
 
 def _error(exc: DatabaseError) -> dict[str, Any]:
@@ -224,6 +249,100 @@ def wowsims_get_wowhead_link(
 
 
 @mcp.tool(annotations=READ_ONLY)
+def wowsims_list_specs() -> dict[str, Any]:
+    """List supported DPS class/spec presets and their allowed races."""
+    return {
+        "ok": True,
+        "specs": list_specs(get_presets()),
+        "sim_version": SIM_COMMIT,
+        "ruleset_note": "TBC rules; single-player DPS presets without raid buffs.",
+    }
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def wowsims_simulate(
+    character_class: Annotated[
+        str, Field(validation_alias="class", description="Player class, such as rogue.")
+    ],
+    spec: Annotated[
+        str,
+        Field(description="Spec or preset ID from wowsims_list_specs, such as combat."),
+    ],
+    race: Annotated[str, Field(description="Race valid for the selected class.")],
+    gear: Annotated[
+        dict[str, str | int] | None,
+        Field(
+            default=None,
+            description="Optional gear overrides by slot; item names or IDs. "
+            "Unspecified slots use the preset.",
+        ),
+    ] = None,
+    talents: Annotated[
+        str | None,
+        Field(default=None, description="Optional wowsims/Wowhead talent string."),
+    ] = None,
+    duration_s: Annotated[float, Field(default=300, gt=0, le=3600)] = 300,
+    targets: Annotated[int, Field(default=1, ge=1, le=20)] = 1,
+    iterations: Annotated[int, Field(default=3000, ge=1, le=20000)] = 3000,
+) -> dict[str, Any]:
+    """Simulate a player using a preset plus optional gear and talent overrides."""
+    try:
+        presets = get_presets()
+        request, metadata = build_request(
+            presets,
+            get_database(),
+            spec,
+            character_class,
+            race,
+            gear,
+            talents,
+            duration_s,
+            targets,
+            iterations,
+        )
+        result = await get_runner().run(request)
+        summary = simulation_summary(result)
+        return {
+            "ok": True,
+            **metadata,
+            **summary,
+            "duration_s": duration_s,
+            "targets": targets,
+            "ruleset_note": "TBC sim result, not combat logs; no raid/party buffs.",
+            "summary": (
+                f"{metadata['race'].replace('_', ' ').title()} "
+                f"{metadata['spec'].replace('_', ' ').title()} "
+                f"{metadata['class'].title()}: ~{summary['dps']['mean']:.1f} DPS "
+                f"(±{summary['dps']['stdev']:.1f}) over {duration_s:g}s, "
+                f"{targets} target(s), no raid buffs."
+            ),
+        }
+    except DatabaseError as exc:
+        return _error(exc)
+    except SimulationUnavailable as exc:
+        return {
+            "ok": False,
+            "code": "SIM_UNAVAILABLE",
+            "message": str(exc),
+            "next_step": "Configure the simulator before requesting a simulation.",
+        }
+    except SimulationTimeout as exc:
+        return {
+            "ok": False,
+            "code": "SIM_TIMEOUT",
+            "message": str(exc),
+            "next_step": "Retry with fewer iterations or a shorter encounter.",
+        }
+    except SimulationError as exc:
+        return {
+            "ok": False,
+            "code": "SIM_FAILED",
+            "message": str(exc),
+            "next_step": "Check gear, talents, and spec compatibility.",
+        }
+
+
+@mcp.tool(annotations=READ_ONLY)
 def wowsims_help(
     task: Annotated[str | None, Field(default=None, max_length=200)] = None,
 ) -> dict[str, Any]:
@@ -277,6 +396,23 @@ def wowsims_help(
             "one_line": "Generate an unverified Wowhead link.",
             "example_call": {"kind": "item", "id_or_name": 19019},
             "keywords": "wowhead link url item spell npc zone set",
+        },
+        {
+            "tool": "wowsims_list_specs",
+            "one_line": "List supported DPS class/spec presets and valid races.",
+            "example_call": {},
+            "keywords": "class spec race list supported simulate",
+        },
+        {
+            "tool": "wowsims_simulate",
+            "one_line": "Simulate a class, spec, race, and optional gear overrides.",
+            "example_call": {
+                "class": "rogue",
+                "spec": "combat",
+                "race": "troll",
+                "gear": {"main_hand": "Thunderfury"},
+            },
+            "keywords": "simulate dps damage gear race class spec result",
         },
     ]
     if task:

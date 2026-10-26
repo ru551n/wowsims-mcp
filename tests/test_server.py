@@ -25,6 +25,8 @@ async def test_mcp_lists_annotated_tools() -> None:
         "wowsims_search_enchants",
         "wowsims_search_consumables",
         "wowsims_get_wowhead_link",
+        "wowsims_list_specs",
+        "wowsims_simulate",
         "wowsims_help",
     }
     assert all(tool.annotations and tool.annotations.readOnlyHint for tool in tools)
