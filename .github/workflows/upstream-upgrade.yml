@@ -26,7 +26,7 @@ jobs:
       changed: ${{ steps.upstream.outputs.changed }}
       latest: ${{ steps.upstream.outputs.latest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check upstream
         id: upstream
         env:
