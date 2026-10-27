@@ -380,8 +380,25 @@ def main() -> None:
                     f"{key}: build has no spec field {config['field']} or aliases"
                 )
             entry["field"] = field
+            if "equipment" in player:
+                entry["equipment"] = player["equipment"]
+            else:
+                path = root / config["path"]
+                gear_names = [config["gear"], *config.get("gear_fallback", [])]
+                gear_path = next(
+                    (
+                        path / "gear_sets" / f"{name}.gear.json"
+                        for name in gear_names
+                        if (path / "gear_sets" / f"{name}.gear.json").exists()
+                    ),
+                    None,
+                )
+                if gear_path is None:
+                    raise FileNotFoundError(
+                        f"{key}: build has no equipment and no gear fallback exists"
+                    )
+                entry["equipment"] = json.loads(gear_path.read_text())
             entry.update(
-                equipment=player["equipment"],
                 rotation=player["rotation"],
                 talents=player["talentsString"],
                 consumables=player.get("consumables", {}),
