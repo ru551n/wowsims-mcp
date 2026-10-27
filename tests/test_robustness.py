@@ -26,11 +26,7 @@ def test_case_variant_save_updates_one_character() -> None:
 async def test_mcp_json_import_accepts_transport_preparsed_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    path = Path(
-        "/tmp/wowsims-forever/ui/specs/hunter/dps/builds/phase_1/bm/pre_raid.build.json"
-    )
-    if not path.exists():
-        pytest.skip("Pinned UI export fixture is not available")
+    path = Path(__file__).parent / "fixtures/hunter.build.json"
     store = CharacterStore(":memory:")
     monkeypatch.setattr(server, "_store", store)
     _, result = await server.mcp.call_tool(

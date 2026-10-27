@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - name: Fetch pinned game database
+        run: python3 -c 'import re; from pathlib import Path; text=Path("src/wowsims_mcp/constants.py").read_text(); commit=re.search(r"SIM_COMMIT = \"([0-9a-f]+)\"", text).group(1); import subprocess; subprocess.run(["python3", "tools/fetch_database.py", commit, "data/db.json"], check=True)'
       - name: Run Python checks
         run: |
           uv sync

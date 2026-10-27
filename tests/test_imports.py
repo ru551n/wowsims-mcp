@@ -11,11 +11,7 @@ from wowsims_mcp.presets import load_presets
 
 
 def test_real_ui_json_import(real_database: GameDatabase) -> None:
-    path = Path(
-        "/tmp/wowsims-forever/ui/specs/hunter/dps/builds/phase_1/bm/pre_raid.build.json"
-    )
-    if not path.exists():
-        pytest.skip("Pinned UI export fixture is not available")
+    path = Path(__file__).parent / "fixtures/hunter.build.json"
     request, metadata, warnings = import_sim_json(
         path.read_text(), load_presets(), real_database
     )
