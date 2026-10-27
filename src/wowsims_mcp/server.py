@@ -12,6 +12,7 @@ from .comparison import build_variant_request, compare_requests, stat_weights
 from .constants import SIM_COMMIT, SIM_REF
 from .database import DatabaseError, GameDatabase, make_filters
 from .imports import import_sim_json
+from .patches import SourceUnavailable, get_patch_changes
 from .presets import apply_overrides, build_request, list_specs, load_presets
 from .simulation import (
     SimulationError,
@@ -437,6 +438,47 @@ async def wowsims_simulate(
             "message": str(exc),
             "next_step": "Check gear, talents, and spec compatibility.",
         }
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def wowsims_get_patch_changes(
+    item_or_spell: Annotated[
+        str | None,
+        Field(default=None, description="Item or spell name fragment, or numeric ID."),
+    ] = None,
+    since_patch: Annotated[
+        str | None,
+        Field(
+            default=None, description="Build such as 1.60.1.70334; default: newest 3."
+        ),
+    ] = None,
+    limit: Annotated[int, Field(default=20, ge=1, le=50)] = 20,
+) -> dict[str, Any]:
+    """What changed for items and spells in recent patches and hotfixes."""
+    try:
+        result = await get_patch_changes(item_or_spell, since_patch, limit)
+    except SourceUnavailable as exc:
+        return {
+            "ok": False,
+            "code": "SOURCE_UNAVAILABLE",
+            "message": str(exc),
+            "next_step": "Fall back to a web search for the patch notes.",
+        }
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "code": "INVALID_INPUT",
+            "message": str(exc),
+            "next_step": "Omit since_patch or use a build such as 1.60.1.70334.",
+        }
+    n = len(result["changes"])
+    return {
+        "ok": True,
+        **result,
+        "source": "wowsims/gamedata (live, cached up to 1 hour)",
+        "summary": f"{n} change(s) found"
+        + (" (more available)." if result["has_more"] else "."),
+    }
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -888,6 +930,12 @@ def wowsims_help(
                 "variants": [{"label": "Troll", "race": "troll"}],
             },
             "keywords": "compare simulation racial gear talent better dps",
+        },
+        {
+            "tool": "wowsims_get_patch_changes",
+            "one_line": "What changed for an item or spell in recent patches.",
+            "example_call": {"item_or_spell": "Faerie Fire"},
+            "keywords": "patch hotfix nerf buff changed notes",
         },
         {
             "tool": "wowsims_stat_weights",

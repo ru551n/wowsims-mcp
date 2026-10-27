@@ -35,6 +35,7 @@ async def test_mcp_lists_annotated_tools() -> None:
         "wowsims_delete_character",
         "wowsims_update_character",
         "wowsims_stat_weights",
+        "wowsims_get_patch_changes",
         "wowsims_help",
     }
     writes = {

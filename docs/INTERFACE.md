@@ -345,7 +345,7 @@ deltas. The tool for "which racial / which trinket is better".
 
 **`wowsims_get_patch_changes`** (F7): what changed recently.
 - args: `item_or_spell?`, `since_patch?`, `limit?`
-- returns: `{changes: [{patch, kind, name, before, after}], has_more}`
+- returns: `{changes: [{patch, kind (item|spell), change (added|removed|changed), id, name, before?, after?}], has_more, searched_builds}`; `since_patch` is a build such as `1.60.1.70334`, default the newest 3 builds. `before`/`after` are the changed card lines.
 - source: `wowsims/gamedata` patch files, fetched at runtime and cached briefly
   on the data volume. Never bundled in the repo or image. If the fetch fails:
   error `SOURCE_UNAVAILABLE`, and the bot falls back to web search.
