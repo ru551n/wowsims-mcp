@@ -5,7 +5,7 @@ description = "MCP tools for looking up World of Warcraft items in the wowsims d
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
-    "mcp>=1.29,<2",
+    "mcp>=1.29,<3",
     "pydantic>=2.0",
 ]
 
