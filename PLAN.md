@@ -262,7 +262,21 @@ owning it.
 7. Do the `gamedata` patch files (`items-changed.diff`, `CHANGES.md`) contain item
    names and IDs, and how big are they (needed for F7 and its runtime fetch)?
 8. Does the sim expose talent tree data and stat caps (F10, F11), and are crafting
-   recipes anywhere in `db.json` (F15)?
+   recipes anywhere in `db.json` (F15)? **Checked 2026-10-27 at the pinned ref:**
+   - `db.json` keys: items, randomSuffixes, enchants, gems, zones, npcs,
+     itemEffectRandPropPoints, itemIcons, spellIcons, encounters, consumables,
+     spellEffects. No talent trees, no stat caps, no recipes.
+   - Talents (F11): `assets/locales/en/talents.json` only maps internal keys to names
+     per class. Tree layout and ranks live in Go (`sim/<class>/talents_*.go`) and the
+     UI, not in a data file. Talent *strings* work already (presets carry them and
+     `simulate`/`compare` take `talents`). So `wowsims_get_talents` needs the tree
+     scraped from source: not data-supported; defer, rely on compare with strings.
+   - Caps (F10): `assets/db_inputs/basestats-forever/CombatRatings.txt` gives rating
+     per percent (flat 10 for hit/haste/expertise, 14 for crit at levels 60-90), but
+     the miss-chance/cap formulas are Go code, and the UI's per-spec soft caps are TS.
+     Deriving caps means re-implementing sim rules; the data-backed alternative is a
+     sim sweep of hit rating via `bonusStats` (as `stat_weights` does).
+   - Recipes (F15): none in `db.json`; crafted items only via `sources`.
 
 ## Milestones
 
