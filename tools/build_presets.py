@@ -58,6 +58,22 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "beast_mastery",
         "field": "hunter",
         "build": "hunter/dps/builds/phase_1/bm/pre_raid.build.json",
+        "path": "hunter/dps",
+        "gear": "p1",
+        "rotation": "default",
+        "talents": "5320001505101251-0053250001-4",
+        "options": {
+            "classOptions": {
+                "ammo": "ThoriumHeadedArrow",
+                "quiverBonus": "AncientSinewWrappedLamina",
+                "petUptime": 1,
+                "petAttackSpeed": "FasterAttackII",
+                "cobraReflexes": True,
+                "petAggression": 5,
+                "petType": "Raptor",
+            }
+        },
+        "distance": 7,
         "races": [
             "dwarf",
             "night_elf",
@@ -322,7 +338,7 @@ def main() -> None:
             for k, v in config.items()
             if k not in {"path", "gear", "gear_fallback", "rotation", "build"}
         }
-        if "build" in config:
+        if "build" in config and (root / config["build"]).exists():
             build = json.loads((root / config["build"]).read_text())
             player = build["player"]
             entry.update(
