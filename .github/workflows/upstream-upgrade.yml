@@ -1,0 +1,109 @@
+name: Automated upstream upgrade
+
+on:
+  schedule:
+    - cron: "27 4 * * *"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Optional full wowsims/forever commit SHA (defaults to master)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-wowsims-upgrade
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.upstream.outputs.changed }}
+      latest: ${{ steps.upstream.outputs.latest }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check upstream
+        id: upstream
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REQUESTED_COMMIT: ${{ inputs.commit }}
+        run: |
+          if [ -n "$REQUESTED_COMMIT" ]; then
+            python3 - <<'PY'
+          import json, os
+          sha = os.environ["REQUESTED_COMMIT"]
+          if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+              raise SystemExit("Requested commit must be a full lowercase SHA")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"changed=true\nlatest={sha}\n")
+          PY
+          else
+            python3 tools/check_upstream.py --output upstream.json
+          fi
+      - name: Stop when already pinned
+        if: steps.upstream.outputs.changed != 'true'
+        run: echo "No upstream update required."
+      - name: Set up Go and protobuf
+        if: steps.upstream.outputs.changed == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.4"
+      - name: Install protobuf compiler
+        if: steps.upstream.outputs.changed == 'true'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libprotobuf-dev
+      - name: Install uv
+        if: steps.upstream.outputs.changed == 'true'
+        uses: astral-sh/setup-uv@v5
+      - name: Create upgrade branch and regenerate inputs
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "upstream/${LATEST:0:12}"
+          git clone --filter=blob:none https://github.com/wowsims/forever.git /tmp/wowsims-forever
+          git -C /tmp/wowsims-forever checkout "$LATEST"
+          test "$(git -C /tmp/wowsims-forever rev-parse HEAD)" = "$LATEST"
+          python3 tools/update_upstream.py "$LATEST" --source /tmp/wowsims-forever
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          protoc -I=/tmp/wowsims-forever/proto \
+            --go_opt=Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb \
+            --go_out=/tmp/wowsims-forever/sim/core /tmp/wowsims-forever/proto/*.proto
+          (cd /tmp/wowsims-forever && CGO_ENABLED=0 go build --tags=with_db -o "$GITHUB_WORKSPACE/data/wowsimcli" ./cmd/wowsimcli)
+          uv sync
+      - name: Run upgrade tests
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          uv run ruff check .
+          uv run mypy
+          uv run pytest -q
+      - name: Create upgrade pull request
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          git add src/wowsims_mcp/constants.py src/wowsims_mcp/presets.json src/wowsims_mcp/calibration.json Dockerfile
+          if git diff --cached --quiet; then
+            echo "No file changes after regeneration; stopping."
+            exit 0
+          fi
+          git commit -m "chore(upstream): update wowsims to ${LATEST:0:12}"
+          git push origin "upstream/${LATEST:0:12}"
+          existing=$(gh pr list --head "upstream/${LATEST:0:12}" --state open --json number --jq '.[0].number')
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --title "Update wowsims to ${LATEST:0:12}" \
+              --body "Automated update to wowsims/forever@${LATEST}. Regenerates the preset manifest and database, and runs all tests including per-spec simulations. Auto-merge is enabled only after the candidate container passes CI." \
+              --label upstream
+          else
+            gh pr edit "$existing" --add-label upstream
+          fi
+          gh pr merge "upstream/${LATEST:0:12}" --auto --squash

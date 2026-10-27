@@ -1,0 +1,64 @@
+name: Upstream wowsims monitor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-wowsims-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check wowsims/forever master
+        id: upstream
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 tools/check_upstream.py --output upstream.json
+      - name: Find existing issue for this upstream commit
+        if: steps.upstream.outputs.changed == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          number=$(gh issue list --state open --label upstream --limit 100 --json number,body \
+            --jq ".[] | select(.body | contains(\"Target upstream commit: ${LATEST}\")) | .number" | head -n 1)
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+      - name: Create upstream review issue
+        if: steps.upstream.outputs.changed == 'true' && steps.existing.outputs.number == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.upstream.outputs.latest }}
+        run: |
+          {
+            echo "Target upstream commit: ${LATEST}"
+            echo
+            python3 -c 'import json; print(json.load(open("upstream.json"))["message"])'
+            echo "### Upgrade checklist"
+            echo
+            echo "- [ ] Review spec, item, proto, and build changes"
+            echo "- [ ] Update SIM_COMMIT, SIM_REF, Dockerfile, and calibration pin"
+            echo "- [ ] Regenerate presets.json and db.json from the same commit"
+            echo "- [ ] Recalibrate matcher if scoring or data changed"
+            echo "- [ ] Run all tests and smoke-test every supported spec"
+          } > upstream-issue.md
+          gh issue create \
+            --title "Upstream wowsims update: ${LATEST:0:12}" \
+            --label upstream \
+            --body-file upstream-issue.md
+      - name: Upload change report
+        if: steps.upstream.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-change-report
+          path: upstream.json
+          retention-days: 14
