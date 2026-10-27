@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from wowsims_mcp import server
@@ -65,6 +67,9 @@ def test_armory_update_is_an_unavailable_stub() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    not Path("data/wowsimcli").exists(), reason="Pinned simulator is not built"
+)
 async def test_simulate_saved_character() -> None:
     save("discord-1", "Main Rogue")
     result = await server.wowsims_simulate(
