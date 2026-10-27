@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -89,7 +90,8 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "arcane",
         "field": "mage",
         "path": "mage/dps",
-        "gear": "preBisArcane",
+        "gear": "p1Arcane",
+        "gear_fallback": ["preBisArcane"],
         "rotation": "arcane",
         "talents": "2500052300030150330125--053500031003001",
         "races": ["human", "gnome", "draenei", "undead", "troll", "blood_elf"],
@@ -108,7 +110,8 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "retribution",
         "field": "retributionPaladin",
         "path": "paladin/retribution",
-        "gear": "preraid",
+        "gear": "default",
+        "gear_fallback": ["preraid"],
         "rotation": "default",
         "talents": "5-053201-0523005120033125331051",
         "races": ["human", "dwarf", "draenei", "blood_elf"],
@@ -130,6 +133,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "shadow",
         "field": "priest",
         "path": "priest/dps",
+        "build": "priest/dps/builds/testing.build.json",
         "gear": "pre_raid",
         "rotation": "default",
         "talents": "500230013--503250510240103051451",
@@ -150,8 +154,10 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "combat",
         "field": "rogue",
         "path": "rogue/dps",
-        "gear": "p1",
-        "rotation": "swords",
+        "gear": "p1_bscombat",
+        "gear_fallback": ["p1"],
+        "rotation": "default",
+        "rotation_fallback": ["swords"],
         "talents": "00532012502-023305200005015002321151",
         "races": [
             "human",
@@ -177,6 +183,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "elemental",
         "field": "elementalShaman",
         "path": "shaman/elemental",
+        "build": "shaman/elemental/builds/testing.build.json",
         "gear": "preraid",
         "rotation": "default",
         "talents": "55003105100213351051--05105301005",
@@ -197,6 +204,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "enhancement",
         "field": "enhancementShaman",
         "path": "shaman/enhancement",
+        "build": "shaman/enhancement/builds/testing.build.json",
         "gear": "preraid",
         "rotation": "default",
         "talents": "03-500502210501133531151-50005301",
@@ -332,11 +340,30 @@ def main() -> None:
         ).strip(),
         "specs": {},
     }
+    capabilities_path = args.source / "ui/sim/player/classes/capabilities_auto_gen.ts"
+    class_races: dict[str, list[str]] = {}
+    if capabilities_path.exists():
+        text = capabilities_path.read_text()
+        for class_name, race_text in re.findall(
+            r"\[Class\.Class(\w+)\]:\s*\[([^\]]+)\]", text
+        ):
+            class_races[class_name.lower()] = [
+                re.sub(r"(?<!^)(?=[A-Z])", "_", race).lower()
+                for race in re.findall(r"Race\.Race(\w+)", race_text)
+            ]
     for key, config in SPECS.items():
         entry = {
             k: v
             for k, v in config.items()
-            if k not in {"path", "gear", "gear_fallback", "rotation", "build"}
+            if k
+            not in {
+                "path",
+                "gear",
+                "gear_fallback",
+                "rotation",
+                "rotation_fallback",
+                "build",
+            }
         }
         if "build" in config and (root / config["build"]).exists():
             build = json.loads((root / config["build"]).read_text())
@@ -368,12 +395,28 @@ def main() -> None:
                     f"{key}: none of {gear_names} exists; available gear: {available}"
                 )
             entry["preset_gear"] = gear_path.name.removesuffix(".gear.json")
+            rotation_names = [
+                config["rotation"],
+                *config.get("rotation_fallback", []),
+            ]
+            rotation_path = next(
+                (
+                    path / "apls" / f"{name}.apl.json"
+                    for name in rotation_names
+                    if (path / "apls" / f"{name}.apl.json").exists()
+                ),
+                None,
+            )
+            if rotation_path is None:
+                raise FileNotFoundError(
+                    f"{key}: no rotation found from {rotation_names}"
+                )
             entry.update(
                 equipment=json.loads(gear_path.read_text()),
-                rotation=json.loads(
-                    (path / "apls" / f"{config['rotation']}.apl.json").read_text()
-                ),
+                rotation=json.loads(rotation_path.read_text()),
             )
+        if config["class"] in class_races:
+            entry["races"] = class_races[config["class"]]
         entry["class_enum"] = "Class" + config["class"].title()
         entry["spec_enum"] = {
             "balance_druid": "SpecBalanceDruid",

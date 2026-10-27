@@ -20,6 +20,8 @@ RACES = {
     "tauren": "RaceTauren",
     "troll": "RaceTroll",
     "undead": "RaceUndead",
+    "high_order_skyborne": "RaceHighOrderSkyborne",
+    "windshaper_skyborne": "RaceWindshaperSkyborne",
 }
 SLOT_ALIASES = {
     "head": 0,
