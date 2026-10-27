@@ -55,6 +55,20 @@ jobs:
         run: |
           docker run -d --name wowsims-mcp -p 8765:8000 wowsims-mcp:candidate
           trap 'docker logs wowsims-mcp; docker rm -f wowsims-mcp' EXIT
+          for attempt in $(seq 1 30); do
+            if docker logs wowsims-mcp 2>&1 | grep -q 'Uvicorn running on'; then
+              break
+            fi
+            if ! docker inspect -f '{{.State.Running}}' wowsims-mcp | grep -q true; then
+              echo 'Container exited before becoming ready.'
+              exit 1
+            fi
+            if [ "$attempt" = 30 ]; then
+              echo 'Container did not become ready in time.'
+              exit 1
+            fi
+            sleep 1
+          done
           uv run python - <<'PY'
           import asyncio
           from mcp import ClientSession
