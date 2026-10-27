@@ -66,7 +66,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "upstream/${LATEST:0:12}"
+          if git show-ref --verify --quiet "refs/heads/upstream/${LATEST:0:12}"; then
+            git checkout "upstream/${LATEST:0:12}"
+          else
+            git checkout -b "upstream/${LATEST:0:12}"
+          fi
           git clone --filter=blob:none https://github.com/wowsims/forever.git /tmp/wowsims-forever
           git -C /tmp/wowsims-forever checkout "$LATEST"
           test "$(git -C /tmp/wowsims-forever rev-parse HEAD)" = "$LATEST"
