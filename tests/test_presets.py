@@ -47,7 +47,7 @@ def test_spec_class_mismatch_lists_valid_specs(real_database: GameDatabase) -> N
 
 
 def test_invalid_race_lists_valid_races(real_database: GameDatabase) -> None:
-    with pytest.raises(DatabaseError, match="blood_elf"):
+    with pytest.raises(DatabaseError, match="Valid races"):
         build_request(load_presets(), real_database, "retribution", "paladin", "tauren")
 
 
