@@ -307,7 +307,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "gear": "prebis_fury",
         "gear_fallback": ["preraid_fury"],
         "rotation": "fury",
-        "talents": "3400502130201-05050005505012050115",
+        "talents": "30305213002-15053105102210501",
         "races": [
             "human",
             "dwarf",
@@ -324,18 +324,20 @@ SPECS: dict[str, dict[str, Any]] = {
             "classOptions": {
                 "queueDelay": 250,
                 "startingRage": 50,
-                "defaultShout": "WarriorShoutBattle",
+                "useBattleShout": True,
                 "defaultStance": "WarriorStanceBerserker",
                 "hasBsT2": True,
                 "stanceSnapshot": True,
             }
         },
         "consumables": {
-            "flaskId": 22854,
-            "foodId": 33872,
-            "potId": 22838,
-            "conjuredId": 7676,
-            "ohImbueId": 27186,
+            "foodId": 20452,
+            "explosiveId": 260817,
+            "extraIds": [10646],
+            "resourcePotId": 13442,
+            "mhImbueId": 12643,
+            "ohImbueId": 12404,
+            "elixirIds": [250350, 13452, 12820],
         },
     },
 }
