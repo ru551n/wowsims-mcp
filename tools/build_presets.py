@@ -371,12 +371,21 @@ def main() -> None:
         if "build" in config and (root / config["build"]).exists():
             build = json.loads((root / config["build"]).read_text())
             player = build["player"]
+            field = config["field"]
+            if field not in player:
+                aliases = {"priest": "dpsPriest"}
+                field = aliases.get(field, field)
+            if field not in player:
+                raise KeyError(
+                    f"{key}: build has no spec field {config['field']} or aliases"
+                )
+            entry["field"] = field
             entry.update(
                 equipment=player["equipment"],
                 rotation=player["rotation"],
                 talents=player["talentsString"],
                 consumables=player.get("consumables", {}),
-                options=player[config["field"]]["options"],
+                options=player[field]["options"],
                 distance=player.get("distanceFromTarget", 0),
             )
         else:
