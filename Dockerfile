@@ -1,5 +1,5 @@
 FROM golang:1.25.4-bookworm AS sim-build
-ARG WOWSIMS_COMMIT=f02667f7bcc542d600a3cb924dc7b86a9e856495
+ARG WOWSIMS_COMMIT=0d14cf7921bc45e378dade47a7a527302f3879dd
 RUN apt-get update \
     && apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev python3 \
     && rm -rf /var/lib/apt/lists/* \
@@ -22,7 +22,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 COPY --from=sim-build /presets.json ./src/wowsims_mcp/presets.json
 RUN uv sync --locked --no-dev --no-editable
-ADD https://raw.githubusercontent.com/wowsims/forever/f02667f7bcc542d600a3cb924dc7b86a9e856495/assets/database/db.json /app/data/db.json
+ADD https://raw.githubusercontent.com/wowsims/forever/0d14cf7921bc45e378dade47a7a527302f3879dd/assets/database/db.json /app/data/db.json
 
 FROM python:3.13-slim-bookworm
 WORKDIR /app
