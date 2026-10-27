@@ -35,19 +35,8 @@ class SimulationRunner:
         self.binary = str(binary or os.environ.get("WOWSIMS_CLI_PATH", default_binary))
         self.timeout_s = timeout_s
         self._semaphore = asyncio.Semaphore(concurrency)
-        self._active = 0
-        self._capacity = concurrency
 
     async def run(self, request: dict[str, Any]) -> dict[str, Any]:
-        if self._active >= self._capacity:
-            raise SimulationError("The simulation queue is full; retry shortly.")
-        self._active += 1
-        try:
-            return await self._run(request)
-        finally:
-            self._active -= 1
-
-    async def _run(self, request: dict[str, Any]) -> dict[str, Any]:
         async with self._semaphore:
             with tempfile.TemporaryDirectory(prefix="wowsims-mcp-") as directory:
                 input_path = Path(directory) / "input.json"

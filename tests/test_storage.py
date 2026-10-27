@@ -45,6 +45,7 @@ def test_cannot_modify_another_users_character(
     store: CharacterStore, operation: str
 ) -> None:
     store.save("discord-1", "Main", "rogue", "combat", "troll", settings("one"))
+    store.save("discord-2", "Main", "mage", "arcane", "human", settings("two"))
     with pytest.raises(CharacterError) as error:
         if operation == "save":
             store.save(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, overload
@@ -40,6 +41,10 @@ class CharacterStore:
                 PRIMARY KEY (owner, name)
             )
             """
+        )
+        self.connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS one_character_name_per_user "
+            "ON characters(owner, name COLLATE NOCASE)"
         )
         self.connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS one_default_character "
@@ -116,7 +121,7 @@ class CharacterStore:
                     (owner, name, class, spec, race, settings_json,
                      raw_import, is_default, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(owner, name) DO UPDATE SET
+                ON CONFLICT(owner, name COLLATE NOCASE) DO UPDATE SET
                     class = excluded.class, spec = excluded.spec, race = excluded.race,
                     settings_json = excluded.settings_json,
                     raw_import = excluded.raw_import,
@@ -186,7 +191,7 @@ class CharacterStore:
                 "Save a character from a preset or wowsims UI JSON first.",
             )
         result = dict(row)
-        result["settings"] = json.loads(result.pop("settings_json"))
+        result["settings"] = deepcopy(json.loads(result.pop("settings_json")))
         result["is_default"] = bool(result["is_default"])
         return result
 

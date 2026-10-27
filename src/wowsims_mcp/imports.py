@@ -24,19 +24,24 @@ CLASS_FIELDS = {
 
 
 def import_sim_json(
-    data: str,
+    data: str | dict[str, Any],
     presets: dict[str, Any],
     db: GameDatabase,
     spec: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
-    if len(data.encode()) > 256 * 1024:
+    if isinstance(data, str):
+        if len(data.encode()) > 256 * 1024:
+            raise DatabaseError("Import data exceeds the 256 KB limit.")
+        try:
+            parsed = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise DatabaseError(
+                "Import is not valid JSON. Paste the wowsims UI settings JSON export."
+            ) from exc
+    else:
+        parsed = data
+    if len(json.dumps(parsed, separators=(",", ":")).encode()) > 256 * 1024:
         raise DatabaseError("Import data exceeds the 256 KB limit.")
-    try:
-        parsed = json.loads(data)
-    except json.JSONDecodeError as exc:
-        raise DatabaseError(
-            "Import is not valid JSON. Paste the wowsims UI settings JSON export."
-        ) from exc
     if not isinstance(parsed, dict) or not isinstance(parsed.get("player"), dict):
         raise DatabaseError(
             "Import must contain a player object from a wowsims UI settings export."

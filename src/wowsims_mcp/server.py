@@ -626,7 +626,8 @@ def wowsims_save_character(
         str, Field(description="preset or sim_json; exporter is not supported yet.")
     ] = "preset",
     data: Annotated[
-        str | None, Field(default=None, description="Wowsims UI settings JSON.")
+        str | dict[str, Any] | None,
+        Field(default=None, description="Wowsims UI settings JSON."),
     ] = None,
 ) -> dict[str, Any]:
     """Save a character from a preset or wowsims UI settings JSON."""
@@ -666,7 +667,11 @@ def wowsims_save_character(
             metadata["spec"],
             metadata["race"],
             request,
-            raw_import=data,
+            raw_import=data
+            if isinstance(data, str)
+            else json.dumps(data)
+            if data
+            else None,
             make_default=make_default,
             expected_owner=owner,
         )

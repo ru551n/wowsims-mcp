@@ -40,6 +40,10 @@ def test_two_part_names_and_multiple_characters() -> None:
 
 def test_cross_user_modification_returns_ownership_error() -> None:
     save("discord-1", "Main Rogue")
+    save("discord-2", "Other Mage", "mage")
+    server._store.connection.execute(
+        "UPDATE characters SET name = 'Main Rogue' WHERE owner = 'discord-2'"
+    )
     result = save("discord-2", "main rogue", "mage")
     assert result["ok"] is False
     assert result["code"] == "CHARACTER_OWNERSHIP_MISMATCH"
