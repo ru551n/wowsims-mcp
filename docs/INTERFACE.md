@@ -154,7 +154,9 @@ override.
 **`wowsims_best_items_for_slot`** (after F3): rank items for a slot by the stat
 weights from `wowsims_stat_weights`.
 - args: `owner`, `character?`, `slot`, `limit?`
-- returns: `{ranked: [{id, name, ilvl, score, delta_vs_equipped}], summary}`
+- args: also `class`/`spec`/`race` instead of `owner`; `gear`, `talents`, `iterations?`
+- returns: `{equipped, weights, ranked: [{id, name, ilvl, score, delta_vs_equipped (null if slot empty/unknown), has_effects, sources, wowhead_url}], candidates, excluded_random_suffix_items, summary}`
+- score = sum of sim stat weights x item stats. Not modelled: item effects (flagged `has_effects`), set bonuses, sockets, caps. Armor slots are limited to the class's armor proficiency; random-suffix items are excluded and counted; weapon and ranged slots return an error (use `wowsims_compare`). `equipped` can be missing from `db.json` (the sim knows more items), then deltas are null.
 
 Name resolution used by every override (F2 onward) is the same resolver as
 `wowsims_search_items`: `exact` and `confident` resolve silently (the tool

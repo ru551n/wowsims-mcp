@@ -78,3 +78,30 @@ async def test_real_stat_weights() -> None:
     assert weights["agility"]["value"] > 0
     assert weights["intellect"]["value"] < weights["agility"]["value"]
     assert result["weights"][0]["relative"] == 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not Path("data/wowsimcli").exists(), reason="Pinned simulator is not built"
+)
+async def test_real_best_items_for_slot() -> None:
+    result = await server.wowsims_best_items_for_slot(
+        slot="head",
+        character_class="rogue",
+        spec="combat",
+        race="human",
+        iterations=300,
+        limit=5,
+    )
+    assert result["ok"] is True, result
+    scores = [row["score"] for row in result["ranked"]]
+    assert scores == sorted(scores, reverse=True)
+    assert all(row["id"] != 34333 for row in result["ranked"])  # mail helm
+    weapon = await server.wowsims_best_items_for_slot(
+        slot="main_hand",
+        character_class="rogue",
+        spec="combat",
+        race="human",
+        iterations=100,
+    )
+    assert weapon["ok"] is False

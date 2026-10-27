@@ -13,7 +13,7 @@ from .constants import SIM_COMMIT, SIM_REF
 from .database import DatabaseError, GameDatabase, make_filters
 from .imports import import_sim_json
 from .patches import SourceUnavailable, get_patch_changes
-from .presets import apply_overrides, build_request, list_specs, load_presets
+from .presets import _slot, apply_overrides, build_request, list_specs, load_presets
 from .simulation import (
     SimulationError,
     SimulationRunner,
@@ -22,6 +22,7 @@ from .simulation import (
     simulation_summary,
 )
 from .storage import CharacterError, CharacterStore
+from .upgrades import rank_slot
 
 mcp = FastMCP(
     "wowsims_mcp",
@@ -482,6 +483,82 @@ async def wowsims_get_patch_changes(
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def wowsims_best_items_for_slot(
+    slot: Annotated[str, Field(description="Gear slot, e.g. head, ring1, trinket2.")],
+    character_class: Annotated[
+        str | None, Field(default=None, validation_alias="class")
+    ] = None,
+    spec: str | None = None,
+    race: str | None = None,
+    owner: str | None = None,
+    character: str | None = None,
+    gear: dict[str, str | int] | None = None,
+    talents: str | None = None,
+    limit: Annotated[int, Field(default=10, ge=1, le=25)] = 10,
+    iterations: Annotated[int, Field(default=5000, ge=1, le=20000)] = 5000,
+) -> dict[str, Any]:
+    """Rank items for a slot by sim stat weights, against what is equipped."""
+    try:
+        request, metadata = _player_request(
+            owner,
+            character,
+            character_class,
+            spec,
+            race,
+            gear,
+            talents,
+            300,
+            1,
+            iterations,
+        )
+        slot_index = _slot(slot)
+        weighted = await stat_weights(get_runner(), request)
+        weights = {row["stat"]: row["value"] for row in weighted["weights"]}
+        player = request["raid"]["parties"][0]["players"][0]
+        result = rank_slot(
+            get_database(),
+            weights,
+            metadata["class"],
+            slot_index,
+            player["equipment"]["items"][slot_index],
+            limit,
+        )
+        best = result["ranked"][0] if result["ranked"] else None
+        return {
+            "ok": True,
+            **metadata,
+            "slot": slot,
+            "weights": weighted["weights"],
+            **result,
+            "ruleset_note": (
+                "Scored by sim stat weights only: item effects, set bonuses, "
+                "sockets and stat caps are not modelled; verify with wowsims_compare."
+            ),
+            "summary": (
+                f"Top for {slot}: {best['name']} "
+                + (
+                    f"({best['delta_vs_equipped']:+.1f} DPS vs equipped by weights)."
+                    if best["delta_vs_equipped"] is not None
+                    else "(slot is empty in this setup)."
+                )
+                if best
+                else f"No candidate items found for {slot}."
+            ),
+        }
+    except DatabaseError as exc:
+        return _error(exc)
+    except CharacterError as exc:
+        return _character_error(exc)
+    except SimulationError as exc:
+        return {
+            "ok": False,
+            "code": getattr(exc, "code", "SIM_FAILED"),
+            "message": str(exc),
+            "next_step": "Check the configuration and simulator availability.",
+        }
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def wowsims_stat_weights(
     character_class: Annotated[
         str | None, Field(default=None, validation_alias="class")
@@ -936,6 +1013,17 @@ def wowsims_help(
             "one_line": "What changed for an item or spell in recent patches.",
             "example_call": {"item_or_spell": "Faerie Fire"},
             "keywords": "patch hotfix nerf buff changed notes",
+        },
+        {
+            "tool": "wowsims_best_items_for_slot",
+            "one_line": "Rank items for a gear slot by sim stat weights.",
+            "example_call": {
+                "class": "rogue",
+                "spec": "combat",
+                "race": "human",
+                "slot": "head",
+            },
+            "keywords": "upgrade best slot gear bis improve item",
         },
         {
             "tool": "wowsims_stat_weights",
