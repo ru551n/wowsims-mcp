@@ -35,5 +35,6 @@ COPY --from=build /app/data /app/data
 COPY --from=sim-build /wowsimcli /usr/local/bin/wowsimcli
 RUN chmod 0444 /app/data/db.json && chown 65532:65532 /app/data
 EXPOSE 8000
+VOLUME ["/app/data"]
 USER 65532:65532
 CMD ["wowsims-mcp"]

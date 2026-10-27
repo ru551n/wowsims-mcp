@@ -1,0 +1,14 @@
+services:
+  wowsims-mcp:
+    image: ${WOWSIMS_MCP_IMAGE:-wowsims-mcp:latest}
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - wowsims-data:/app/data
+    environment:
+      WOWSIMS_STORAGE_PATH: /app/data/characters.db
+
+volumes:
+  wowsims-data:
