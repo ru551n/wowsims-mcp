@@ -59,3 +59,22 @@ async def test_real_comparison_has_noise_flags() -> None:
     )
     assert thunderfury["delta"] < 0
     assert thunderfury["within_noise"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not Path("data/wowsimcli").exists(), reason="Pinned simulator is not built"
+)
+async def test_real_stat_weights() -> None:
+    result = await server.wowsims_stat_weights(
+        character_class="rogue",
+        spec="combat",
+        race="human",
+        iterations=300,
+        duration_s=60,
+    )
+    assert result["ok"] is True, result
+    weights = {row["stat"]: row for row in result["weights"]}
+    assert weights["agility"]["value"] > 0
+    assert weights["intellect"]["value"] < weights["agility"]["value"]
+    assert result["weights"][0]["relative"] == 1.0

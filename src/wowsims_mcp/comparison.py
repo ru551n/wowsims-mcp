@@ -71,3 +71,44 @@ def build_variant_request(
         )
     request["simOptions"]["useLabeledRands"] = True
     return {"label": label, "request": request, "applied_overrides": applied}
+
+
+# Stat enum indexes in the pinned proto (common.proto); stats array has 39 slots.
+WEIGHT_STATS = {
+    "strength": (0, 50),
+    "agility": (1, 50),
+    "intellect": (3, 50),
+    "spell_power": (5, 50),
+    "spirit": (13, 50),
+    "attack_power": (14, 100),
+    "hit_rating": (17, 50),
+    "crit_rating": (18, 50),
+    "haste_rating": (19, 50),
+    "armor_penetration": (20, 50),
+    "expertise_rating": (21, 50),
+}
+STAT_SLOTS = 39
+
+
+async def stat_weights(
+    runner: SimulationRunner, request: dict[str, Any]
+) -> dict[str, Any]:
+    """Finite-difference DPS per point of each stat, shared RNG, vs. the baseline."""
+    base = deepcopy(request)
+    base["simOptions"]["useLabeledRands"] = True
+    baseline = _player_dps(await runner.run(base))
+    rows = []
+    for name, (index, step) in WEIGHT_STATS.items():
+        variant = deepcopy(base)
+        player = variant["raid"]["parties"][0]["players"][0]
+        stats = list(player.get("bonusStats", {}).get("stats") or [])
+        stats += [0] * (STAT_SLOTS - len(stats))
+        stats[index] += step
+        player["bonusStats"] = {"stats": stats}
+        dps = _player_dps(await runner.run(variant))
+        rows.append({"stat": name, "value": (dps["mean"] - baseline["mean"]) / step})
+    top = max((row["value"] for row in rows), default=0)
+    for row in rows:
+        row["relative"] = round(row["value"] / top, 3) if top > 0 else 0
+    rows.sort(key=lambda row: row["value"], reverse=True)
+    return {"weights": rows, "baseline_dps": baseline["mean"]}

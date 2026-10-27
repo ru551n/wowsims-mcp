@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from .comparison import build_variant_request, compare_requests
+from .comparison import build_variant_request, compare_requests, stat_weights
 from .constants import SIM_COMMIT, SIM_REF
 from .database import DatabaseError, GameDatabase, make_filters
 from .imports import import_sim_json
@@ -440,6 +440,64 @@ async def wowsims_simulate(
 
 
 @mcp.tool(annotations=READ_ONLY)
+async def wowsims_stat_weights(
+    character_class: Annotated[
+        str | None, Field(default=None, validation_alias="class")
+    ] = None,
+    spec: str | None = None,
+    race: str | None = None,
+    owner: str | None = None,
+    character: str | None = None,
+    gear: dict[str, str | int] | None = None,
+    talents: str | None = None,
+    duration_s: Annotated[float, Field(default=300, gt=0, le=3600)] = 300,
+    targets: Annotated[int, Field(default=1, ge=1, le=20)] = 1,
+    iterations: Annotated[int, Field(default=5000, ge=1, le=20000)] = 5000,
+) -> dict[str, Any]:
+    """Estimate DPS gained per point of each stat (finite differences, sim-based)."""
+    try:
+        request, metadata = _player_request(
+            owner,
+            character,
+            character_class,
+            spec,
+            race,
+            gear,
+            talents,
+            duration_s,
+            targets,
+            iterations,
+        )
+        result = await stat_weights(get_runner(), request)
+        top = result["weights"][0]
+        return {
+            "ok": True,
+            **metadata,
+            **result,
+            "duration_s": duration_s,
+            "targets": targets,
+            "ruleset_note": "TBC sim estimate; no raid buffs, no stat caps modelled.",
+            "summary": (
+                f"Best stat: {top['stat']} ({top['value']:.2f} DPS/point); "
+                + ", ".join(
+                    f"{w['stat']} {w['relative']:.2f}" for w in result["weights"][:5]
+                )
+            ),
+        }
+    except DatabaseError as exc:
+        return _error(exc)
+    except CharacterError as exc:
+        return _character_error(exc)
+    except SimulationError as exc:
+        return {
+            "ok": False,
+            "code": getattr(exc, "code", "SIM_FAILED"),
+            "message": str(exc),
+            "next_step": "Check the configuration and simulator availability.",
+        }
+
+
+@mcp.tool(annotations=READ_ONLY)
 async def wowsims_compare(
     variants: Annotated[
         list[dict[str, Any]],
@@ -830,6 +888,12 @@ def wowsims_help(
                 "variants": [{"label": "Troll", "race": "troll"}],
             },
             "keywords": "compare simulation racial gear talent better dps",
+        },
+        {
+            "tool": "wowsims_stat_weights",
+            "one_line": "Sim-based DPS per point of each stat for a spec or character.",
+            "example_call": {"class": "rogue", "spec": "combat", "race": "human"},
+            "keywords": "stat weights best stat priority agility crit haste hit",
         },
     ]
     if task:

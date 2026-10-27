@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
+from wowsims_mcp.database import GameDatabase
+from wowsims_mcp.presets import build_request, load_presets
 from wowsims_mcp.simulation import (
     SimulationError,
     SimulationRunner,
@@ -80,12 +81,18 @@ def test_simulation_summary() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(
-    not Path("data/wowsimcli").exists() or not Path("/tmp/wowsims-rogue.json").exists(),
-    reason="Pinned simulator and generated smoke-test request are not available",
+    not Path("data/wowsimcli").exists() or not Path("data/db.json").exists(),
+    reason="Pinned simulator and database are not available",
 )
 async def test_real_simulator_smoke() -> None:
-    request = json.loads(Path("/tmp/wowsims-rogue.json").read_text())
-    request["simOptions"]["iterations"] = 10
+    request, _ = build_request(
+        load_presets(),
+        GameDatabase.load(Path("data/db.json")),
+        "combat",
+        "rogue",
+        "human",
+        iterations=10,
+    )
     result = await SimulationRunner(Path("data/wowsimcli").resolve()).run(request)
     summary = simulation_summary(result)
     assert summary["iterations"] == 10

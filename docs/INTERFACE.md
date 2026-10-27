@@ -336,7 +336,8 @@ deltas. The tool for "which racial / which trinket is better".
 
 **`wowsims_stat_weights`**
 - args: `owner`, `character?`, `encounter?`
-- returns: `{weights: [{stat, value, relative}], summary}`
+- returns: `{weights: [{stat, value, relative}], baseline_dps, summary}`
+- method: finite differences, +50 (+100 attack power) of each stat via `bonusStats`, shared RNG; `value` is DPS per point, `relative` is scaled to the best stat. No stat caps modelled.
 
 ### Later features (provisional, shapes may change)
 
