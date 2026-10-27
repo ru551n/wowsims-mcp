@@ -12,7 +12,8 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "balance",
         "field": "balanceDruid",
         "path": "druid/balance",
-        "gear": "preraid",
+        "gear": "prebis",
+        "gear_fallback": ["preraid"],
         "rotation": "default",
         "talents": "510022312503135231351--520033",
         "races": ["night_elf", "tauren"],
@@ -319,7 +320,7 @@ def main() -> None:
         entry = {
             k: v
             for k, v in config.items()
-            if k not in {"path", "gear", "rotation", "build"}
+            if k not in {"path", "gear", "gear_fallback", "rotation", "build"}
         }
         if "build" in config:
             build = json.loads((root / config["build"]).read_text())
@@ -334,10 +335,25 @@ def main() -> None:
             )
         else:
             path = root / config["path"]
+            gear_names = [config["gear"], *config.get("gear_fallback", [])]
+            gear_paths = [
+                path / "gear_sets" / f"{gear_name}.gear.json"
+                for gear_name in gear_names
+            ]
+            gear_path = next(
+                (candidate for candidate in gear_paths if candidate.exists()), None
+            )
+            if gear_path is None:
+                available = sorted(
+                    candidate.name
+                    for candidate in (path / "gear_sets").glob("*.gear.json")
+                )
+                raise FileNotFoundError(
+                    f"{key}: none of {gear_names} exists; available gear: {available}"
+                )
+            entry["preset_gear"] = gear_path.name.removesuffix(".gear.json")
             entry.update(
-                equipment=json.loads(
-                    (path / "gear_sets" / f"{config['gear']}.gear.json").read_text()
-                ),
+                equipment=json.loads(gear_path.read_text()),
                 rotation=json.loads(
                     (path / "apls" / f"{config['rotation']}.apl.json").read_text()
                 ),
