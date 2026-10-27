@@ -294,7 +294,8 @@ SPECS: dict[str, dict[str, Any]] = {
         "spec": "fury",
         "field": "dpsWarrior",
         "path": "warrior/dps",
-        "gear": "preraid_fury",
+        "gear": "prebis_fury",
+        "gear_fallback": ["preraid_fury"],
         "rotation": "fury",
         "talents": "3400502130201-05050005505012050115",
         "races": [
