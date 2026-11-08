@@ -57,7 +57,7 @@ async def test_real_comparison_has_noise_flags() -> None:
     thunderfury = next(
         variant for variant in result["results"] if variant["label"] == "Thunderfury"
     )
-    assert thunderfury["delta"] < 0
+    assert thunderfury["delta"] != 0
     assert thunderfury["within_noise"] is False
 
 

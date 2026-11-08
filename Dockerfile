@@ -1,5 +1,5 @@
-FROM golang:1.25.4-bookworm AS sim-build
-ARG WOWSIMS_COMMIT=0d14cf7921bc45e378dade47a7a527302f3879dd
+FROM golang:1.25.4-bookworm AS sim-cli
+ARG WOWSIMS_COMMIT=125e534558b5b5588f26aae393894c6ea80bba5e
 RUN apt-get update \
     && apt-get install -y --no-install-recommends protobuf-compiler libprotobuf-dev python3 \
     && rm -rf /var/lib/apt/lists/* \
@@ -12,6 +12,8 @@ RUN git clone --filter=blob:none https://github.com/wowsims/forever.git . \
         --go_opt=Mgoogle/protobuf/descriptor.proto=google.golang.org/protobuf/types/descriptorpb \
         --go_out=./sim/core ./proto/*.proto \
     && CGO_ENABLED=0 go build --tags=with_db -o /wowsimcli ./cmd/wowsimcli
+
+FROM sim-cli AS sim-build
 COPY tools/build_presets.py /tmp/build_presets.py
 RUN python3 /tmp/build_presets.py /src /presets.json
 
@@ -22,7 +24,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 COPY --from=sim-build /presets.json ./src/wowsims_mcp/presets.json
 RUN uv sync --locked --no-dev --no-editable
-ADD https://raw.githubusercontent.com/wowsims/forever/0d14cf7921bc45e378dade47a7a527302f3879dd/assets/database/db.json /app/data/db.json
+ADD https://raw.githubusercontent.com/wowsims/forever/125e534558b5b5588f26aae393894c6ea80bba5e/assets/database/db.json /app/data/db.json
 
 FROM python:3.13-slim-bookworm
 WORKDIR /app

@@ -148,12 +148,16 @@ class NameMatcher:
         return matches[:limit]
 
 
+# Fitted on the typo benchmark in tests/test_calibration.py; see calibration.json.
+TEMPERATURE = 2.0
+NONE_OFFSET = 20.0
+
+
 def probabilities(scores: Iterable[float]) -> tuple[list[float], float]:
     scores = list(scores)
     if not scores:
         return [], 1.0
-    temperature = 1.0
-    none_offset = 20.0
+    temperature, none_offset = TEMPERATURE, NONE_OFFSET
     weights = [math.exp((score - scores[0]) / temperature) for score in scores]
     none_weight = math.exp((none_offset - scores[0]) / temperature)
     total = sum(weights) + none_weight

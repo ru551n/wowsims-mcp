@@ -1,5 +1,9 @@
 # wowsims-mcp: plan
 
+> 2026-11-08: the Forever armory is live. Saved characters (F4) and gear import (F5) were
+> removed; characters are simmed from an armory link (`armory_url`), see
+> docs/INTERFACE.md. F8 is `wowsims_lookup_character`, built on the public armory page.
+
 Status: planning only. Nothing is built yet.
 
 ## Goal

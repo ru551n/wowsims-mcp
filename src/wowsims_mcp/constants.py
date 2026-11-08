@@ -1,5 +1,5 @@
 SIM_REF = "v0.0.140"
-SIM_COMMIT = "0d14cf7921bc45e378dade47a7a527302f3879dd"
+SIM_COMMIT = "125e534558b5b5588f26aae393894c6ea80bba5e"
 DATABASE_URL = (
     "https://raw.githubusercontent.com/wowsims/forever/"
     f"{SIM_COMMIT}/assets/database/db.json"

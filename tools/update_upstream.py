@@ -20,6 +20,9 @@ def main() -> None:
     parser.add_argument("commit", help="Full upstream commit SHA")
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--cli", type=Path, help="wowsimcli built at this commit (reads .siml presets)"
+    )
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         raise SystemExit("Expected a full 40-character upstream commit SHA")
@@ -53,6 +56,7 @@ def main() -> None:
             "tools/build_presets.py",
             str(args.source),
             "src/wowsims_mcp/presets.json",
+            *(["--cli", str(args.cli.resolve())] if args.cli else []),
         ],
         cwd=args.root,
         check=True,

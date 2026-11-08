@@ -35,7 +35,7 @@ SPECS: dict[str, dict[str, Any]] = {
         "field": "feralCatDruid",
         "path": "druid/feralcat",
         "gear": "pre_raid",
-        "rotation": "default",
+        "rotation": "adaptive",
         "talents": "050022-35200032121131212051-052",
         "races": ["night_elf", "tauren"],
         "distance": 0,
@@ -55,7 +55,8 @@ SPECS: dict[str, dict[str, Any]] = {
         "class": "hunter",
         "spec": "beast_mastery",
         "field": "hunter",
-        "build": "hunter/dps/builds/phase_1/bm/pre_raid.build.json",
+        "build": "hunter/dps/builds/bm.siml",
+        "apl": "hunter/dps/apls/default.apl.siml",
         "path": "hunter/dps",
         "gear": "p1",
         "rotation": "default",
@@ -108,6 +109,8 @@ SPECS: dict[str, dict[str, Any]] = {
         "class": "paladin",
         "spec": "retribution",
         "field": "retributionPaladin",
+        "build": "paladin/retribution/builds/unsealed_wrath.siml",
+        "apl": "paladin/retribution/apls/default.apl.siml",
         "path": "paladin/retribution",
         "gear": "default",
         "gear_fallback": ["preraid"],
@@ -343,10 +346,17 @@ SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+def siml_json(cli: str, path: Path) -> dict[str, Any]:
+    """Read an upstream .siml file as protojson with the pinned wowsimcli."""
+    out = subprocess.check_output([cli, "siml", "parse", "-json", str(path)], text=True)
+    return json.loads(out)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--cli", default="/wowsimcli", help="pinned wowsimcli for .siml")
     args = parser.parse_args()
     root = args.source / "ui" / "specs"
     manifest = {
@@ -379,10 +389,17 @@ def main() -> None:
                 "rotation",
                 "rotation_fallback",
                 "build",
+                "apl",
             }
         }
         if "build" in config and (root / config["build"]).exists():
-            build = json.loads((root / config["build"]).read_text())
+            if config["build"].endswith(".siml"):
+                build = siml_json(args.cli, root / config["build"])
+                build["player"]["rotation"] = siml_json(
+                    args.cli, root / config["apl"]
+                )
+            else:
+                build = json.loads((root / config["build"]).read_text())
             player = build["player"]
             field = config["field"]
             if field not in player:

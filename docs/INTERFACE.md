@@ -16,7 +16,7 @@ GPT), answering casual questions from non-technical users. So:
   rest. No single dispatcher tool. The model passes names and short
   strings, never protobuf-shaped blobs. We build the `RaidSimRequest`.
 - **Resolve, don't interrogate.** The server resolves "which character" and says
-  what it resolved (`resolved_character`), so the bot can mention it.
+  what it resolved (`armory_character`), so the bot can mention it.
 - **Errors that tell the next step.** When something is ambiguous or missing, the
   error says exactly what to ask the user (and lists candidates), matching the
   bot's "search, then ask what's still unclear" rule.
@@ -33,31 +33,28 @@ GPT), answering casual questions from non-technical users. So:
 - Server: `wowsims_mcp` (Python, FastMCP). Tools prefixed `wowsims_`.
 - Transport: streamable HTTP, stateless JSON, on the Docker network next to the
   other MCP containers. Bind to the container network, not the host.
-- Identity: `owner` is the Discord user ID as a string (openclaw passes `senderId`
-  on every message). It is a namespace, not a credential: characters are not
-  secret, anyone may sim anyone's character by name.
+- No identity and no stored data: nothing is saved per user.
 
-## Character references
+## Characters via the armory
 
-A character is identified by `owner` + `name` (two-part Forever name, matched
-case-insensitively). Every sim/read tool takes a **`character`** string that
-may be:
+There are no saved characters. A tool that simulates a character takes
+**`armory_url`**, a Forever armory link such as
+`https://worldofwarcraft.blizzard.com/en-us/forever/eu/armory/character/name-surname`.
+The server fetches that public page (only that host, https, 4 MB cap) and reads
+the character profile JSON the page embeds. Gear, enchants, random suffixes,
+race and **talents** come from the character; the talent string is built from the
+armory's talent ranks and the pinned talent trees. The rotation is the preset of
+the character's main talent tree (most points). An explicit `talents`, `race` or
+`gear` argument overrides the armory data (what-if). Without `armory_url`, pass
+`class`, `spec` and `race` to sim a preset.
 
-- `"Name-Part"`: look up by name for the given `owner`, else globally if unique.
-- omitted: the `owner`'s default character.
-
-Resolution rules, in order:
-
-1. Explicit name matches one character: use it.
-2. No name: use the owner's default.
-3. No name, no default, several characters: error `AMBIGUOUS_CHARACTER` with
-   `candidates` (the bot asks the user which one).
-4. Owner has no characters: error `NO_CHARACTERS` with the import instructions.
+Warnings (`warnings`) list anything not mapped: a tree with no sim rotation, talents
+missing from the sim trees, unknown gear slots. Items missing from the item database
+still sim; if the sim does not know an item it fails with the item ID.
 
 ## Tools
 
-All tools return `{ "ok": true, ... }` or an error (below). `owner` is required
-wherever a default may need resolving. Tools are grouped by feature; the feature
+All tools return `{ "ok": true, ... }` or an error (below). Tools are grouped by feature; the feature
 numbers (F1-F9) and build order are in PLAN.md.
 
 ### Tool discovery
@@ -153,8 +150,8 @@ override.
 
 **`wowsims_best_items_for_slot`** (after F3): rank items for a slot by the stat
 weights from `wowsims_stat_weights`.
-- args: `owner`, `character?`, `slot`, `limit?`
-- args: also `class`/`spec`/`race` instead of `owner`; `gear`, `talents`, `iterations?`
+- args: `slot`, `armory_url?` (or `class`/`spec`/`race`), `limit?`
+- args also: `gear`, `talents`, `iterations?`
 - returns: `{equipped, weights, ranked: [{id, name, ilvl, score, delta_vs_equipped (null if slot empty/unknown), has_effects, sources, wowhead_url}], candidates, excluded_random_suffix_items, summary}`
 - score = sum of sim stat weights x item stats. Not modelled: item effects (flagged `has_effects`), set bonuses, sockets, caps. Armor slots are limited to the class's armor proficiency; random-suffix items are excluded and counted; weapon and ranged slots return an error (use `wowsims_compare`). `equipped` can be missing from `db.json` (the sim knows more items), then deltas are null.
 
@@ -268,55 +265,25 @@ default preset. Lets the bot answer "kan ni simma X?" and pick valid inputs.
 - args: none
 - returns: `{specs: [{class, spec, races: [...], has_default_preset}], sim_version, ruleset_note}`
 
-**`wowsims_list_characters`**
-- args: `owner`
-- returns: `{characters: [{name, spec, race, is_default, updated_at}]}`
+**`wowsims_lookup_character`**
+Read a character from an armory link without simming.
+- args: `armory_url`
+- returns: `{name, level, class, race, spec_id, talents, gear: {slot: {name, id, enchant?, randomSuffix?}}, warnings, summary}`
 
-**`wowsims_get_character`**
-Show one stored character: gear per slot (item name + id), enchants, talents,
-race. For "vad har jag på mig?".
-- args: `owner`, `character?`
-- returns: `{resolved_character, race, spec, talents, gear: [{slot, item_id, item_name, enchant?, gems?}], updated_at}`
-
-### Character management (writes)
-
-**`wowsims_save_character`**
-Create or replace a character from an import, or from a default preset.
-- args:
-  - `owner`
-  - `name`
-  - `source`: `"exporter"` | `"sim_json"` | `"preset"`
-  - `data`: the pasted export string / JSON (for `exporter`, `sim_json`)
-  - `spec`: required for `source="preset"` (start from the spec's default preset)
-  - `make_default?`: default true if it is the owner's first character
-- returns: `{saved, resolved_character, race, spec, warnings: [...]}`
-  where `warnings` lists anything the importer could not map (unknown item id,
-  unsupported enchant), so the bot can tell the user.
-- idempotent: same name replaces.
-
-**`wowsims_set_default_character`**
-- args: `owner`, `character`
-- returns: `{default_character}`
-
-**`wowsims_delete_character`** (destructive)
-- args: `owner`, `character`, `confirm` (must be `true`)
-- returns: `{deleted}`. Without `confirm=true`: error `CONFIRM_REQUIRED`.
-
-### Simulation (read-only on stored data)
+### Simulation (read-only)
 
 **`wowsims_simulate`**
 Run one sim for a character, optionally with changes applied on the fly (not
 saved).
 - args:
-  - `owner`
-  - `character?`
+  - `armory_url?` (or `class`, `spec`, `race`)
   - `overrides?`: `{race?, items?: {slot: item_id}, enchants?: {slot: id}, talents?, buffs?, consumables?}`
   - `encounter?`: `{duration_s? (default 300), targets? (default 1)}`
   - `iterations?`: default 3000, max 20000
 - returns:
   ```json
   {
-    "resolved_character": "Name-Part",
+    "armory_character": "Name Surname",
     "applied_overrides": {"race": "Troll"},
     "dps": {"mean": 1234.5, "stdev": 12.3},
     "iterations": 3000,
@@ -331,13 +298,13 @@ saved).
 **`wowsims_compare`**
 Run a baseline and several variants with the same seed and iterations, return
 deltas. The tool for "which racial / which trinket is better".
-- args: `owner`, `character?`, `variants` (1-8 items, each `{label, overrides}`), `encounter?`, `iterations?`
+- args: `armory_url?`, `variants` (1-8 items, each `{label, overrides}`), `encounter?`, `iterations?`
 - returns: `{baseline: {dps}, results: [{label, dps, delta, delta_pct}], best, summary}`
   sorted best to worst. A delta inside the noise (below ~2 stdev) is flagged
   `"within_noise": true` so the bot does not overclaim.
 
 **`wowsims_stat_weights`**
-- args: `owner`, `character?`, `encounter?`
+- args: `armory_url?` (or `class`, `spec`, `race`), `encounter?`
 - returns: `{weights: [{stat, value, relative}], baseline_dps, summary}`
 - method: finite differences, +50 (+100 attack power) of each stat via `bonusStats`, shared RNG; `value` is DPS per point, `relative` is scaled to the best stat. No stat caps modelled.
 
@@ -434,7 +401,6 @@ Codes: `ITEM_NOT_FOUND`, `NO_CHARACTERS`, `AMBIGUOUS_CHARACTER`, `CHARACTER_NOT_
   item is, before guessing. Names can be passed straight into overrides.
 - Use `wowsims_simulate`/`wowsims_compare` for any "which is better / how much
   DPS" question about gear, racials or talents, instead of reasoning from memory.
-- Always pass the message sender's ID as `owner`.
 - If a tool returns `next_step`, follow it; ask the user only what it says to ask.
 - Quote the `summary`, and mention it is a sim result. If `within_noise` is set,
   say the difference is not meaningful.
