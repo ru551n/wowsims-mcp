@@ -8,10 +8,10 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .armory import SLOTS, fetch_character, to_sim
 from .comparison import build_variant_request, compare_requests, stat_weights
 from .constants import SIM_COMMIT, SIM_REF
 from .database import DatabaseError, GameDatabase, make_filters
-from .imports import import_sim_json
 from .patches import SourceUnavailable, get_patch_changes
 from .presets import _slot, apply_overrides, build_request, list_specs, load_presets
 from .simulation import (
@@ -21,7 +21,6 @@ from .simulation import (
     SimulationUnavailable,
     simulation_summary,
 )
-from .storage import CharacterError, CharacterStore
 from .upgrades import rank_slot
 
 mcp = FastMCP(
@@ -41,7 +40,13 @@ mcp = FastMCP(
 _database: GameDatabase | None = None
 _presets: dict[str, Any] | None = None
 _runner: SimulationRunner | None = None
-_store: CharacterStore | None = None
+ARMORY_URL = Annotated[
+    str | None,
+    Field(
+        description="Forever armory character link; uses that character's gear, "
+        "race and talents with the preset rotation of its main talent tree.",
+    ),
+]
 READ_ONLY = ToolAnnotations(
     readOnlyHint=True,
     destructiveHint=False,
@@ -71,9 +76,8 @@ def get_runner() -> SimulationRunner:
     return _runner
 
 
-def _player_request(
-    owner: str | None,
-    character: str | None,
+async def _player_request(
+    armory_url: str | None,
     character_class: str | None,
     spec: str | None,
     race: str | None,
@@ -83,34 +87,43 @@ def _player_request(
     targets: int,
     iterations: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    if owner is not None or character is not None:
-        if owner is None:
-            raise CharacterError(
-                "INVALID_INPUT",
-                "owner is required when loading a saved character.",
-                "Pass the Discord user ID as owner.",
-            )
-        saved = get_store().get(owner, character)
-        request = saved["settings"]
-        metadata = {
-            "resolved_character": saved["name"],
-            "class": saved["class"],
-            "spec": saved["spec"],
-            "race": saved["race"],
-            "gear_overrides": [],
-            "buffs": "none",
-        }
-        metadata["gear_overrides"] = apply_overrides(
-            request, get_database(), race=race, gear=gear, talents=talents
+    if armory_url is not None:
+        profile = await fetch_character(armory_url)
+        sim_class, spec_id, sim_race, items, armory_talents, warnings = to_sim(
+            profile, get_presets()
         )
-        if race is not None:
-            metadata["race"] = request["raid"]["parties"][0]["players"][0]["race"]
+        request, metadata = build_request(
+            get_presets(),
+            get_database(),
+            spec_id,
+            sim_class,
+            sim_race,
+            None,
+            None,
+            duration_s,
+            targets,
+            iterations,
+        )
+        player = request["raid"]["parties"][0]["players"][0]
+        player["equipment"]["items"] = items
+        player["talentsString"] = talents or armory_talents
+        player["name"] = f"{profile['name']} {profile.get('surname', '')}".strip()
+        metadata.update(
+            {
+                "armory_character": player["name"],
+                "level": profile.get("level"),
+                "preset": "armory gear, race and talents; preset rotation",
+                "talents": talents or armory_talents,
+                "warnings": warnings,
+            }
+        )
+        metadata["gear_overrides"] = apply_overrides(
+            request, get_database(), race=race, gear=gear
+        )
     else:
         if character_class is None or spec is None or race is None:
-            raise CharacterError(
-                "INVALID_INPUT",
-                "class, spec, and race are required for an ad-hoc simulation.",
-                "Provide all three, or pass owner and optionally character.",
+            raise DatabaseError(
+                "Provide an armory_url, or class, spec and race for a preset."
             )
         request, metadata = build_request(
             get_presets(),
@@ -132,22 +145,6 @@ def _player_request(
     return request, metadata
 
 
-def get_store() -> CharacterStore:
-    global _store
-    if _store is None:
-        _store = CharacterStore()
-    return _store
-
-
-def _character_error(exc: CharacterError) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "code": exc.code,
-        "message": str(exc),
-        "next_step": exc.next_step,
-    }
-
-
 def _error(exc: DatabaseError) -> dict[str, Any]:
     try:
         details = json.loads(str(exc))
@@ -165,7 +162,7 @@ def _error(exc: DatabaseError) -> dict[str, Any]:
         }
     return {
         "ok": False,
-        "code": "INVALID_INPUT",
+        "code": getattr(exc, "code", "INVALID_INPUT"),
         "message": str(exc),
         "next_step": "Check the arguments or call wowsims_search_items for candidates.",
     }
@@ -349,7 +346,7 @@ async def wowsims_simulate(
         Field(
             default=None,
             validation_alias="class",
-            description="Player class; omit when loading a saved character.",
+            description="Player class; omit when using armory_url.",
         ),
     ] = None,
     spec: Annotated[
@@ -359,14 +356,7 @@ async def wowsims_simulate(
     race: Annotated[
         str | None, Field(default=None, description="Race or race override.")
     ] = None,
-    owner: Annotated[
-        str | None,
-        Field(default=None, description="Discord user ID for a saved character."),
-    ] = None,
-    character: Annotated[
-        str | None,
-        Field(default=None, description="Saved character name; omit for default."),
-    ] = None,
+    armory_url: ARMORY_URL = None,
     gear: Annotated[
         dict[str, str | int] | None,
         Field(
@@ -385,9 +375,8 @@ async def wowsims_simulate(
 ) -> dict[str, Any]:
     """Simulate a player using a preset plus optional gear and talent overrides."""
     try:
-        request, metadata = _player_request(
-            owner,
-            character,
+        request, metadata = await _player_request(
+            armory_url,
             character_class,
             spec,
             race,
@@ -416,8 +405,6 @@ async def wowsims_simulate(
         }
     except DatabaseError as exc:
         return _error(exc)
-    except CharacterError as exc:
-        return _character_error(exc)
     except SimulationUnavailable as exc:
         return {
             "ok": False,
@@ -439,6 +426,39 @@ async def wowsims_simulate(
             "message": str(exc),
             "next_step": "Check gear, talents, and spec compatibility.",
         }
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def wowsims_lookup_character(armory_url: str) -> dict[str, Any]:
+    """Read a character's class, race, spec and gear from a Forever armory link."""
+    try:
+        profile = await fetch_character(armory_url)
+        sim_class, spec_id, sim_race, items, talents, warnings = to_sim(
+            profile, get_presets()
+        )
+    except DatabaseError as exc:
+        return _error(exc)
+    gear = {
+        key: {"name": profile["gear"][key].get("name"), **items[SLOTS[key]]}
+        for key in profile["gear"]
+        if key in SLOTS
+    }
+    return {
+        "ok": True,
+        "name": f"{profile['name']} {profile.get('surname', '')}".strip(),
+        "level": profile.get("level"),
+        "class": sim_class,
+        "race": sim_race,
+        "spec_id": spec_id,
+        "gear": gear,
+        "talents": talents,
+        "warnings": warnings,
+        "summary": (
+            f"{profile['name']} {profile.get('surname', '')}: level "
+            f"{profile.get('level')} {sim_race.replace('_', ' ')} {sim_class}, "
+            f"{len(gear)} gear slots."
+        ),
+    }
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -490,8 +510,7 @@ async def wowsims_best_items_for_slot(
     ] = None,
     spec: str | None = None,
     race: str | None = None,
-    owner: str | None = None,
-    character: str | None = None,
+    armory_url: ARMORY_URL = None,
     gear: dict[str, str | int] | None = None,
     talents: str | None = None,
     limit: Annotated[int, Field(default=10, ge=1, le=25)] = 10,
@@ -499,9 +518,8 @@ async def wowsims_best_items_for_slot(
 ) -> dict[str, Any]:
     """Rank items for a slot by sim stat weights, against what is equipped."""
     try:
-        request, metadata = _player_request(
-            owner,
-            character,
+        request, metadata = await _player_request(
+            armory_url,
             character_class,
             spec,
             race,
@@ -547,8 +565,6 @@ async def wowsims_best_items_for_slot(
         }
     except DatabaseError as exc:
         return _error(exc)
-    except CharacterError as exc:
-        return _character_error(exc)
     except SimulationError as exc:
         return {
             "ok": False,
@@ -565,8 +581,7 @@ async def wowsims_stat_weights(
     ] = None,
     spec: str | None = None,
     race: str | None = None,
-    owner: str | None = None,
-    character: str | None = None,
+    armory_url: ARMORY_URL = None,
     gear: dict[str, str | int] | None = None,
     talents: str | None = None,
     duration_s: Annotated[float, Field(default=300, gt=0, le=3600)] = 300,
@@ -575,9 +590,8 @@ async def wowsims_stat_weights(
 ) -> dict[str, Any]:
     """Estimate DPS gained per point of each stat (finite differences, sim-based)."""
     try:
-        request, metadata = _player_request(
-            owner,
-            character,
+        request, metadata = await _player_request(
+            armory_url,
             character_class,
             spec,
             race,
@@ -605,8 +619,6 @@ async def wowsims_stat_weights(
         }
     except DatabaseError as exc:
         return _error(exc)
-    except CharacterError as exc:
-        return _character_error(exc)
     except SimulationError as exc:
         return {
             "ok": False,
@@ -634,8 +646,7 @@ async def wowsims_compare(
     race: Annotated[
         str | None, Field(default=None, description="Baseline race or override.")
     ] = None,
-    owner: str | None = None,
-    character: str | None = None,
+    armory_url: ARMORY_URL = None,
     gear: Annotated[
         dict[str, str | int] | None,
         Field(default=None, description="Optional baseline gear overrides by slot."),
@@ -647,9 +658,8 @@ async def wowsims_compare(
 ) -> dict[str, Any]:
     """Compare race, gear, or talent variants against one baseline using shared RNG."""
     try:
-        baseline, metadata = _player_request(
-            owner,
-            character,
+        baseline, metadata = await _player_request(
+            armory_url,
             character_class,
             spec,
             race,
@@ -693,8 +703,6 @@ async def wowsims_compare(
         }
     except DatabaseError as exc:
         return _error(exc)
-    except CharacterError as exc:
-        return _character_error(exc)
     except ValueError as exc:
         return {
             "ok": False,
@@ -723,206 +731,6 @@ async def wowsims_compare(
             "message": str(exc),
             "next_step": "Check each variant's gear, talents, and spec compatibility.",
         }
-
-
-@mcp.tool(annotations=READ_ONLY)
-def wowsims_list_characters(owner: str) -> dict[str, Any]:
-    """List a Discord user's saved characters and their default."""
-    return {"ok": True, "characters": get_store().list(owner)}
-
-
-@mcp.tool(annotations=READ_ONLY)
-def wowsims_get_character(owner: str, character: str | None = None) -> dict[str, Any]:
-    """Show a saved character's class, spec, race, gear, and talents."""
-    try:
-        saved = get_store().get(owner, character)
-        player = saved["settings"]["raid"]["parties"][0]["players"][0]
-        gear = []
-        slots = [
-            "head",
-            "neck",
-            "shoulder",
-            "back",
-            "chest",
-            "wrist",
-            "hands",
-            "waist",
-            "legs",
-            "feet",
-            "finger1",
-            "finger2",
-            "trinket1",
-            "trinket2",
-            "main_hand",
-            "off_hand",
-            "ranged",
-        ]
-        for slot, item in zip(slots, player["equipment"]["items"], strict=True):
-            if item.get("id"):
-                row = get_database().by_id.get(item["id"])
-                gear.append(
-                    {
-                        "slot": slot,
-                        "item_id": item["id"],
-                        "item_name": row["name"] if row else "unknown",
-                        "enchant": item.get("enchant"),
-                        "gems": item.get("gems", []),
-                    }
-                )
-        return {
-            "ok": True,
-            "resolved_character": saved["name"],
-            "race": saved["race"],
-            "class": saved["class"],
-            "spec": saved["spec"],
-            "talents": player.get("talentsString", ""),
-            "gear": gear,
-            "updated_at": saved["updated_at"],
-        }
-    except CharacterError as exc:
-        return _character_error(exc)
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=False, idempotentHint=True, openWorldHint=False
-    )
-)
-def wowsims_save_character(
-    owner: Annotated[str, Field(description="Discord user ID.")],
-    name: str,
-    character_class: Annotated[
-        str | None, Field(default=None, validation_alias="class")
-    ] = None,
-    spec: str | None = None,
-    race: str | None = None,
-    gear: dict[str, str | int] | None = None,
-    talents: str | None = None,
-    make_default: bool | None = None,
-    source: Annotated[
-        str, Field(description="preset or sim_json; exporter is not supported yet.")
-    ] = "preset",
-    data: Annotated[
-        str | dict[str, Any] | None,
-        Field(default=None, description="Wowsims UI settings JSON."),
-    ] = None,
-) -> dict[str, Any]:
-    """Save a character from a preset or wowsims UI settings JSON."""
-    try:
-        warnings: list[str] = []
-        if source == "sim_json":
-            if data is None:
-                raise DatabaseError("data is required when source is sim_json.")
-            request, metadata, warnings = import_sim_json(
-                data, get_presets(), get_database(), spec
-            )
-        elif source == "preset":
-            if character_class is None or spec is None or race is None:
-                raise DatabaseError(
-                    "class, spec, and race are required when source is preset."
-                )
-            request, metadata = build_request(
-                get_presets(),
-                get_database(),
-                spec,
-                character_class,
-                race,
-                gear,
-                talents,
-            )
-        elif source == "exporter":
-            raise DatabaseError(
-                "Exporter addon imports are not supported yet. "
-                "Use source=sim_json with a wowsims UI settings export."
-            )
-        else:
-            raise DatabaseError("source must be preset or sim_json.")
-        saved = get_store().save(
-            owner,
-            name,
-            metadata["class"],
-            metadata["spec"],
-            metadata["race"],
-            request,
-            raw_import=data
-            if isinstance(data, str)
-            else json.dumps(data)
-            if data
-            else None,
-            make_default=make_default,
-            expected_owner=owner,
-        )
-        return {
-            "ok": True,
-            "saved": True,
-            "resolved_character": saved["name"],
-            "race": saved["race"],
-            "class": saved["class"],
-            "spec": saved["spec"],
-            "is_default": saved["is_default"],
-            "warnings": warnings,
-        }
-    except (DatabaseError, CharacterError) as exc:
-        return _character_error(exc) if isinstance(exc, CharacterError) else _error(exc)
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=False, idempotentHint=True, openWorldHint=False
-    )
-)
-def wowsims_set_default_character(owner: str, character: str) -> dict[str, Any]:
-    """Set which saved character is used when no name is supplied."""
-    try:
-        saved = get_store().set_default(owner, character)
-        return {"ok": True, "default_character": saved["name"]}
-    except CharacterError as exc:
-        return _character_error(exc)
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=False,
-        destructiveHint=True,
-        idempotentHint=True,
-        openWorldHint=False,
-    )
-)
-def wowsims_delete_character(
-    owner: str, character: str, confirm: bool = False
-) -> dict[str, Any]:
-    """Delete a saved character only after explicit confirmation."""
-    try:
-        return {"ok": True, **get_store().delete(owner, character, confirm)}
-    except CharacterError as exc:
-        return _character_error(exc)
-
-
-@mcp.tool(
-    annotations=ToolAnnotations(
-        readOnlyHint=False, idempotentHint=True, openWorldHint=True
-    )
-)
-def wowsims_update_character(
-    owner: str, character: str | None = None
-) -> dict[str, Any]:
-    """Update saved gear from the Forever armory when that source becomes available."""
-    try:
-        saved = get_store().get(owner, character)
-        return {
-            "ok": False,
-            "code": "SOURCE_UNAVAILABLE",
-            "message": (
-                f"Cannot update {saved['name']}: the Forever armory is not open yet. "
-                "No character data was changed."
-            ),
-            "next_step": (
-                "Use wowsims_save_character with gear overrides for now. "
-                "Armory updates will be enabled after a supported source is available."
-            ),
-        }
-    except CharacterError as exc:
-        return _character_error(exc)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -1024,6 +832,14 @@ def wowsims_help(
                 "slot": "head",
             },
             "keywords": "upgrade best slot gear bis improve item",
+        },
+        {
+            "tool": "wowsims_lookup_character",
+            "one_line": "Read a character's gear from a Forever armory link.",
+            "example_call": {
+                "armory_url": "https://worldofwarcraft.blizzard.com/en-us/forever/eu/armory/character/name-surname"
+            },
+            "keywords": "armory character link gear import my char lookup",
         },
         {
             "tool": "wowsims_stat_weights",

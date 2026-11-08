@@ -475,6 +475,23 @@ def main() -> None:
             "fury_warrior": "SpecDpsWarrior",
         }[key]
         manifest["specs"][key] = entry
+    manifest["trees"] = {}
+    for class_name in sorted({entry["class"] for entry in manifest["specs"].values()}):
+        tree_path = args.source / "ui/sim/talents/trees" / f"{class_name}.json"
+        manifest["trees"][class_name] = [
+            {
+                "name": tree["name"],
+                "talents": [
+                    {
+                        "name": talent["fancyName"],
+                        "ids": [talent["spellId"], talent.get("definitionId")],
+                        "max": talent["maxPoints"],
+                    }
+                    for talent in tree["talents"]
+                ],
+            }
+            for tree in json.loads(tree_path.read_text())
+        ]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, separators=(",", ":")))
 

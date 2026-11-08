@@ -5,42 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from wowsims_mcp import server
 from wowsims_mcp.simulation import SimulationRunner
-from wowsims_mcp.storage import CharacterStore
-
-
-def test_case_variant_save_updates_one_character() -> None:
-    store = CharacterStore(":memory:")
-    settings = {"raid": {"parties": [{"players": []}]}}
-    store.save("owner", "Main Rogue", "rogue", "combat", "troll", settings)
-    store.save("owner", "main rogue", "mage", "arcane", "human", settings)
-    assert len(store.list("owner")) == 1
-    assert store.get("owner", "MAIN ROGUE")["class"] == "mage"
-    store.delete("owner", "MAIN ROGUE", confirm=True)
-    assert store.list("owner") == []
-    store.close()
-
-
-@pytest.mark.asyncio
-async def test_mcp_json_import_accepts_transport_preparsed_object(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    path = Path(__file__).parent / "fixtures/hunter.build.json"
-    store = CharacterStore(":memory:")
-    monkeypatch.setattr(server, "_store", store)
-    _, result = await server.mcp.call_tool(
-        "wowsims_save_character",
-        {
-            "owner": "owner",
-            "name": "My Hunter",
-            "source": "sim_json",
-            "data": path.read_text(),
-        },
-    )
-    assert result["ok"] is True, result
-    assert result["class"] == "hunter"
-    store.close()
 
 
 @pytest.mark.asyncio

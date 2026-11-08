@@ -28,23 +28,13 @@ async def test_mcp_lists_annotated_tools() -> None:
         "wowsims_list_specs",
         "wowsims_simulate",
         "wowsims_compare",
-        "wowsims_list_characters",
-        "wowsims_get_character",
-        "wowsims_save_character",
-        "wowsims_set_default_character",
-        "wowsims_delete_character",
-        "wowsims_update_character",
         "wowsims_stat_weights",
+        "wowsims_lookup_character",
         "wowsims_best_items_for_slot",
         "wowsims_get_patch_changes",
         "wowsims_help",
     }
-    writes = {
-        "wowsims_save_character",
-        "wowsims_set_default_character",
-        "wowsims_delete_character",
-        "wowsims_update_character",
-    }
+    writes = {}
     assert all(
         tool.annotations and tool.annotations.readOnlyHint == (tool.name not in writes)
         for tool in tools
