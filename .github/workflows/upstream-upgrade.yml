@@ -50,7 +50,7 @@ jobs:
         run: echo "No upstream update required."
       - name: Set up Go and protobuf
         if: steps.upstream.outputs.changed == 'true'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "1.25.4"
       - name: Install protobuf compiler
